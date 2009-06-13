@@ -1,0 +1,60 @@
+
+nbhttp - Tools for building non-blocking HTTP components
+
+
+* About nbhttp
+
+nbhttp is a set of libraries for building non-blocking (a.k.a. asynchronous
+or event-driven) HTTP clients, servers and intermediaries. 
+
+Its aims are to expose full HTTP functionality in a conformant manner, with
+the maximum potential for performance.
+
+It is NOT YET SUITABLE FOR PRODUCTION USE. In particular, the code has not 
+been optimised or benchmarked, nor are there limits on resource usage, logging
+or any number of other things that make a practical web server or intermediary
+a useful thing.
+
+However, it's lots of fun to prototype and play with.
+
+
+* Requirements
+
+nbhttp needs Python 2.5 or greater; see <http://python.org/>
+
+Optionally, it will take advantage of the pyevent extension, if installed.
+See <http://code.google.com/p/pyevent/>.
+
+
+* Installation
+
+> python setup.py install
+
+
+* SUPPORT, REPORTING ISSUES AND CONTRIBUTING
+
+See <http://github.com/mnot/nbhttp/> to give feedback, report issues, and 
+contribute.
+
+
+* License
+
+Copyright (c) 2008-2009 Mark Nottingham
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
