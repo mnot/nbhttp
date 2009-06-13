@@ -240,7 +240,6 @@ class _TcpConnectionBase(object):
             self.pause_cb(True)
 
     def pause(self, paused):
-        print "****** %s pause: %s" % (id(self), paused)
         self._paused = paused
 
     def close(self):
