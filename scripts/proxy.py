@@ -26,7 +26,7 @@ def proxy_handler(method, uri, req_hdrs, s_res_start, req_pause):
     c = Client(c_res_start)
     req_body, req_done = c.req_start(method, uri, req_hdrs, req_pause)
     # can modify req_body here
-    return req_body, req_done
+    return req_body, req_done 
 
 
 if __name__ == "__main__":
