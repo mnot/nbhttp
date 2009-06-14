@@ -29,10 +29,10 @@ from urlparse import urlsplit, urlunsplit
 
 import push_tcp
 from common import HttpMessageParser, \
-    CLOSE, COUNTED, CHUNKED, \
+    CLOSE, COUNTED, CHUNKED, NONE, \
     WAITING, HEADERS_DONE, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
-    linesep
+    linesep, dummy
 
 # TODO: pipelining
 # TODO: proxy support
@@ -217,9 +217,6 @@ class Client(HttpMessageParser):
               "1.1", status_code, status_phrase, [], dummy)
         self.res_body_cb(str(body))
         self._input_end(persist)
-
-def dummy(*args, **kw):
-    pass
 
 
 class _HttpConnectionPool:

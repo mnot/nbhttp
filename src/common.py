@@ -30,7 +30,7 @@ hdr_end = re.compile(r"\r?\n\r?\n", re.M)
 linesep = "\r\n" 
 
 # conn_modes
-CLOSE, COUNTED, CHUNKED = 0, 1, 2
+CLOSE, COUNTED, CHUNKED, NONE = 0, 1, 2, 3
 
 # states
 WAITING, HEADERS_DONE = 1, 2
@@ -76,7 +76,11 @@ class HttpMessageParser:
             else: # partial headers; store it and wait for more
                 self._input_buffer = instr
         elif self._input_state == HEADERS_DONE:
-            if self._input_delimit == CLOSE:
+            if self._input_delimit == NONE: # a message without a body
+                self._input_end(True)
+                self._input_state = WAITING
+                self._handle_input(instr)
+            elif self._input_delimit == CLOSE:
                 self._input_body(instr)
             elif self._input_delimit == CHUNKED:
                 if self._input_body_left > 0:
@@ -179,10 +183,10 @@ class HttpMessageParser:
         except ValueError: # parsing error of some kind; abort.
             return ""
                                 
+        self._input_state = HEADERS_DONE
         if not allows_body:
-            self._input_state = WAITING
+            self._input_delimit = NONE
         else:
-            self._input_state = HEADERS_DONE
             if len(transfer_codes) > 0:
                 if 'chunked' in transfer_codes:
                     self._input_delimit = CHUNKED

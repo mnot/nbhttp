@@ -30,10 +30,10 @@ import logging
 
 import push_tcp
 from common import HttpMessageParser, \
-    CLOSE, COUNTED, CHUNKED, \
+    CLOSE, COUNTED, CHUNKED, NONE, \
     WAITING, HEADERS_DONE, \
     no_body_status, hop_by_hop_hdrs, \
-    linesep
+    linesep, dummy
 
 logging.basicConfig()
 log = logging.getLogger('server')
@@ -95,10 +95,7 @@ class HttpServerConnection(HttpMessageParser):
             res_top.append("Connection: close, default, %s" % self.req_version)
         res_top.append(linesep)
         self._tcp_conn.write(linesep.join(res_top))
-        if (status_code in no_body_status) or (self.method == "HEAD"):
-            self._res_state = WAITING
-        else:
-            self._res_state = HEADERS_DONE
+        self._res_state = HEADERS_DONE
         return self.res_body, self.res_end
 
     def res_body(self, data):
@@ -115,6 +112,8 @@ class HttpServerConnection(HttpMessageParser):
         assert self._res_state == HEADERS_DONE, self._res_state
         self._res_state = WAITING
         # TODO: if we sent C-L and we haven't written that many bytes, blow up.
+        if self._res_delimit == NONE:
+            pass
         if self._res_delimit == CHUNKED:
             self._tcp_conn.write("0\r\n\r\n") # We don't support trailers
         if self._res_delimit == CLOSE:
@@ -166,7 +165,7 @@ class HttpServerConnection(HttpMessageParser):
         log.info("%s server req_start %s %s %s" % (id(self), method, uri, self.req_version))
         self.req_body_cb, self.req_end_cb = self.request_handler(
                 method, uri, hdr_tuples, self.res_start, self.req_body_pause)
-        allows_body = (content_length != None) or (transfer_codes != [])
+        allows_body = (content_length) or (transfer_codes != [])
         return req_version, allows_body
 
     def _input_body(self, chunk):
@@ -177,9 +176,7 @@ class HttpServerConnection(HttpMessageParser):
          
     def _handle_error(self, status_code, status_phrase, body=""):
 #        self._queue.append(ErrorHandler(status_code, status_phrase, body, self))
-        def dummy_pause(paused):
-            pass
-        self.res_start(status_code, status_phrase, [], dummy_pause)
+        self.res_start(status_code, status_phrase, [], dummy)
         self.res_body(body)
         self.res_end(False)
     
