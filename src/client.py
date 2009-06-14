@@ -63,21 +63,21 @@ class Client(HttpMessageParser):
         req_hdrs is a list of (field_name, field_value) for
         the request headers.
         
-        Returns a (req_body, req_done, res_body_pause) tuple.
+        Returns a (req_body, req_done) tuple.
         """
         assert self._req_state == WAITING
         self._req_body_pause_cb = req_body_pause
         (scheme, authority, path, query, fragment) = urlsplit(uri)
         if scheme.lower() != 'http':
             self._handle_error("400", "Bad Request", "Only HTTP URLs are supported", True)
-            return dummy, dummy, dummy
+            return dummy, dummy
         if ":" in authority:
             host, port = authority.rsplit(":", 1)
             try:
                 port = int(port)
             except ValueError:
                 self._handle_error("400", "Bad Request", "Non-integer port", True)
-                return dummy, dummy, dummy
+                return dummy, dummy
         else:
             host, port = authority, 80
         if path == "":
