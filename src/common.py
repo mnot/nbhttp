@@ -203,3 +203,5 @@ class HttpMessageParser:
                 self._input_body_left = 0
         return rest
     
+def dummy(*args, **kw):
+    pass
