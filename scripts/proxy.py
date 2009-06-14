@@ -5,12 +5,12 @@ A simple HTTP proxy as a demonstration.
 """
 
 
-try:
-    from nbhttp import Client, Server, header_dict, run, client, schedule
-except ImportError: # run from dist without installation
-    import sys
+import sys
+try: # run from dist without installation
     sys.path.insert(0, "..")
     from src import Client, Server, header_dict, run, client, schedule
+except ImportError:
+    from nbhttp import Client, Server, header_dict, run, client, schedule
 
 # TODO: CONNECT support
 # TODO: remove headers nominated by Connection
