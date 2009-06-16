@@ -172,10 +172,8 @@ class HttpMessageParser:
 
         # ignore content-length if transfer-encoding is present
         if transfer_codes != [] and content_length != None:
-            hdr_tuples = [(n,v) for (n,v) in hdr_tuples if n.strip().lower() != 'content-length']
+#            hdr_tuples = [(n,v) for (n,v) in hdr_tuples if n.strip().lower() != 'content-length']
             content_length = None 
-
-        # FIXME: strip hop-by-hop headers (except when we want to see EVERYTHING)
 
         try:
             version, allows_body = self._input_start(top_line, hdr_tuples, 
