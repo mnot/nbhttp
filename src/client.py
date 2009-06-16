@@ -202,6 +202,8 @@ class Client(HttpMessageParser):
     def _input_end(self, complete):
         if self._tcp_conn:
             if self._tcp_conn.tcp_connected and self._conn_reusable:
+                # Note that we don't reset read_cb; if more bytes come in before
+                # the next request, we'll still get them.
                 _idle_pool.release(self._tcp_conn)
             else:
                 self._tcp_conn.close()
