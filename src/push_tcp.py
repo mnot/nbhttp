@@ -270,7 +270,7 @@ class _AsyncoreConnection(_TcpConnectionBase, asyncore.dispatcher):
     handle_close = _TcpConnectionBase.conn_closed
         
     def handle_error(self):
-        raise
+        self.connect_error_handler(self.host, self.port, sys.exc_info()[1][0])
 
 
 class _EventConnection(_TcpConnectionBase):
