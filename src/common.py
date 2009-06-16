@@ -64,6 +64,9 @@ class HttpMessageParser:
 
     def _input_end(self, complete):
         raise NotImplementedError
+    
+    def _input_extra(self, chunk):
+        raise NotImplementedError
         
     def _handle_input(self, instr):
         if self._input_buffer != "":
@@ -79,7 +82,8 @@ class HttpMessageParser:
             if self._input_delimit == NONE: # a message without a body
                 self._input_end(True)
                 self._input_state = WAITING
-                self._handle_input(instr)
+                if instr: # FIXME: will not work with pipelining
+                    self._input_extra(instr)
             elif self._input_delimit == CLOSE:
                 self._input_body(instr)
             elif self._input_delimit == CHUNKED:
@@ -128,9 +132,11 @@ class HttpMessageParser:
                 if self._input_body_left <= len(instr): # got it all (and more?)
                     self._input_body(instr[:self._input_body_left])
                     self._input_state = WAITING
-                    self._input_end(True)
                     if instr[self._input_body_left:]:
-                        self._handle_input(instr[self._input_body_left:])
+                        # This will catch extra input that isn't on packet boundaries.
+                        self._input_extra(instr[self._input_body_left:])
+                    else:
+                        self._input_end(True) # 
                 else: # got some of it
                     self._input_body(instr)
                     self._input_body_left -= len(instr)

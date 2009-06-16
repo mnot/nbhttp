@@ -210,6 +210,10 @@ class Client(HttpMessageParser):
                 self._tcp_conn = None
         self.res_end_cb(complete)
 
+    def _input_extra(self, chunk):
+        self._input_body(chunk) # Tell the application about the extra data
+        self._input_end(False) # ... and then end the response. FIXME: won't work with pipelining
+
     # misc
 
     def _handle_error(self, status_code, status_phrase, body, persist=False):

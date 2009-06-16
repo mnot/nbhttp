@@ -173,6 +173,11 @@ class HttpServerConnection(HttpMessageParser):
     
     def _input_end(self, complete):
         self.req_end_cb(complete)
+        
+    def _input_extra(self, chunk):
+        self._input_end(True) # Finish the outstanding request
+        # FIXME: This is a request with a body that has extra; by definition
+        # it can't be a pipelined request. Do we do anything else with the data?
          
     def _handle_error(self, status_code, status_phrase, body=""):
 #        self._queue.append(ErrorHandler(status_code, status_phrase, body, self))
