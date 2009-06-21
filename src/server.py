@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 
 """
-nbhttp.server - asynchronous HTTP server library
+asynchronous HTTP server library
+"""
 
+__author__ = "Mark Nottingham <mnot@mnot.net>"
+__copyright__ = """\
 Copyright (c) 2008-2009 Mark Nottingham
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -34,6 +37,8 @@ from common import HttpMessageParser, \
     WAITING, HEADERS_DONE, \
     no_body_status, hop_by_hop_hdrs, \
     linesep, dummy
+
+from error import *
 
 logging.basicConfig()
 log = logging.getLogger('server')
@@ -96,7 +101,7 @@ class HttpServerConnection(HttpMessageParser):
         res_top.append(linesep)
         self._tcp_conn.write(linesep.join(res_top))
         self._res_state = HEADERS_DONE
-        return self.res_body, self.res_end
+        return self.res_body, self.res_done
 
     def res_body(self, data):
         log.debug("%s server res_body %s " % (id(self), len(data)))
@@ -107,20 +112,21 @@ class HttpServerConnection(HttpMessageParser):
         else:
             self._tcp_conn.write("%s" % data)
 
-    def res_end(self, complete=True):
+    def res_done(self, err=None):
         log.debug("%s server res_end" % id(self))
         assert self._res_state == HEADERS_DONE, self._res_state
         self._res_state = WAITING
         # TODO: if we sent C-L and we haven't written that many bytes, blow up.
-        if self._res_delimit == NONE:
+        if err:
+            # TODO: serialise error, if possible
+            self._tcp_conn.close()  # FIXME: is this necessary?         
+        elif self._res_delimit == NONE:
             pass
-        if self._res_delimit == CHUNKED:
+        elif self._res_delimit == CHUNKED:
             self._tcp_conn.write("0\r\n\r\n") # We don't support trailers
-        if self._res_delimit == CLOSE:
+        elif self._res_delimit == CLOSE:
             self._tcp_conn.close()
-        elif not complete:
-            self._tcp_conn.close()
-        # TODO: cleanup if prematurely aborted
+         # TODO: cleanup if prematurely aborted
 
     def req_body_pause(self, paused):
         if self._tcp_conn and self._tcp_conn.tcp_connected:
@@ -153,10 +159,10 @@ class HttpServerConnection(HttpMessageParser):
             uri, req_version = _req_line.rsplit(None, 1)
             self.req_version = float(req_version.rsplit('/', 1)[1])
         except ValueError, why:
-            self._handle_error("400", "Bad Request", why)
+            self._handle_error(ERR_HTTP_VERSION, why)
             raise ValueError
         if req_version == 1.1 and 'host' not in [ k.strip().lower() for (k,v) in hdr_tuples]:
-            self._handle_error("400", "Bad Request", "Host header required.")
+            self._handle_error(ERR_HOST_REQ)
             raise ValueError
 
         self.method = method
@@ -171,19 +177,25 @@ class HttpServerConnection(HttpMessageParser):
     def _input_body(self, chunk):
         self.req_body_cb(chunk)
     
-    def _input_end(self, complete):
-        self.req_end_cb(complete)
-        
-    def _input_extra(self, chunk):
-        self._input_end(True) # Finish the outstanding request
-        # FIXME: This is a request with a body that has extra; by definition
-        # it can't be a pipelined request. Do we do anything else with the data?
-         
-    def _handle_error(self, status_code, status_phrase, body=""):
+    def _input_end(self, err=None, detail=None):
+        if err and detail:
+            err['detail'] = detail
+        self.req_end_cb(err) #FIXME: is this the right place to send a parsing error?
+                 
+    def _handle_error(self, err, detail=None):
 #        self._queue.append(ErrorHandler(status_code, status_phrase, body, self))
-        self.res_start(status_code, status_phrase, [], dummy)
+        assert self._res_state == WAITING
+        if detail:
+            err['detail'] = detail
+        status_code, status_phrase = err.get('status', ('400', 'Bad Request'))
+        hdrs = [
+            ('Content-Type', 'text/plain'),
+            ('Connection', 'close'),
+        ]
+        body = err['desc']
+        self.res_start(status_code, status_phrase, hdrs, dummy)
         self.res_body(body)
-        self.res_end(False)
+        self.res_done(err)
     
     
 def test_handler(method, uri, hdrs, res_start, req_pause):
@@ -192,14 +204,14 @@ def test_handler(method, uri, hdrs, res_start, req_pause):
     res_hdrs = [('Content-Type', 'text/plain')]
     def res_pause(paused):
         pass
-    res_body, res_end = res_start(code, phrase, hdrs, res_pause)
+    res_body, res_done = res_start(code, phrase, hdrs, res_pause)
     res_body('foo!')
-    res_end(True)
+    res_done()
     def req_body(data):
         pass
-    def req_end(complete):
+    def req_done(complete):
         pass
-    return req_body, req_end
+    return req_body, req_done
     
 if __name__ == "__main__":
     sys.stderr.write("PID: %s\n" % os.getpid())

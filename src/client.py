@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 
 """
-nbhttp.client - asynchronous HTTP client library
+asynchronous HTTP client library
+"""
 
+__author__ = "Mark Nottingham <mnot@mnot.net>"
+__copyright__ = """\
 Copyright (c) 2008-2009 Mark Nottingham
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -24,7 +27,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
-import sys
 from urlparse import urlsplit, urlunsplit
 
 import push_tcp
@@ -33,6 +35,7 @@ from common import HttpMessageParser, \
     WAITING, HEADERS_DONE, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
     linesep, dummy
+from error import *
 
 # TODO: pipelining
 # TODO: proxy support
@@ -69,14 +72,14 @@ class Client(HttpMessageParser):
         self._req_body_pause_cb = req_body_pause
         (scheme, authority, path, query, fragment) = urlsplit(uri)
         if scheme.lower() != 'http':
-            self._handle_error("400", "Bad Request", "Only HTTP URLs are supported", True)
+            self._handle_error(ERR_URL)
             return dummy, dummy
         if ":" in authority:
             host, port = authority.rsplit(":", 1)
             try:
                 port = int(port)
             except ValueError:
-                self._handle_error("400", "Bad Request", "Non-integer port", True)
+                self._handle_error(ERR_URL)
                 return dummy, dummy
         else:
             host, port = authority, 80
@@ -105,8 +108,7 @@ class Client(HttpMessageParser):
         assert self._req_state == HEADERS_DONE
         if not data: return
         if self._req_content_length == None: # TODO: chunked requests
-            return self._handle_error("411", "Length Required", 
-                                    "Request bodies require content-length")
+            return self._handle_error(ERR_CL_REQ)
         self._req_buffer.append(data)
         if self._tcp_conn and self._tcp_conn.tcp_connected:
             self._tcp_conn.write("".join(self._req_buffer))
@@ -114,7 +116,7 @@ class Client(HttpMessageParser):
         assert self._req_body_sent <= self._req_content_length, \
             "Too many request body bytes sent"
         
-    def req_done(self, complete):
+    def req_done(self, err=None):
         """
         Indicate that the request body is done.
         """
@@ -150,7 +152,7 @@ class Client(HttpMessageParser):
             err = err[1]
         else:
             err = str(err)
-        self._handle_error("504", "Gateway Timeout", err) 
+        self._handle_error(ERR_CONNECT, err)
 
     def _conn_closed(self):
         if self._input_buffer:
@@ -159,7 +161,7 @@ class Client(HttpMessageParser):
             return # we've seen the whole body already, or nothing has happened yet.
         elif self._input_delimit == CLOSE:
             self._input_state = WAITING
-            self._input_end(True)
+            self._input_end()
         else:
             if self.method in idempotent_methods and \
                 self._retries < self.retry_limit and \
@@ -168,7 +170,7 @@ class Client(HttpMessageParser):
                 _idle_pool.attach(self._tcp_conn.host, self._tcp_conn.port, 
                     self._handle_connect, self._handle_connect_error)                
             else:
-                self._input_end(False)
+                self._input_end((ERR_CONNECT, "Server closed the connection."))
 
     def _req_body_pause(self, paused):
         if self._req_body_pause_cb:
@@ -180,6 +182,7 @@ class Client(HttpMessageParser):
         try: 
             res_version, status_txt = top_line.split(None, 1)
             res_version = float(res_version.rsplit('/', 1)[1])
+            # TODO: check that the protocol is HTTP
         except (ValueError, IndexError):
             raise ValueError
         try:
@@ -194,35 +197,39 @@ class Client(HttpMessageParser):
         self.res_body_cb, self.res_end_cb = self.res_start_cb(
                         res_version, res_code, res_phrase, hdr_tuples, self.res_body_pause)
         allows_body = (res_code not in no_body_status) or (self.method == "HEAD")
-        return res_version, allows_body 
+        return allows_body 
 
     def _input_body(self, chunk):
         self.res_body_cb(chunk)
         
-    def _input_end(self, complete):
+    def _input_end(self, err=None, detail=None):
+        if err and detail:
+            err['detail'] = detail
         if self._tcp_conn:
-            if self._tcp_conn.tcp_connected and self._conn_reusable:
+            if self._tcp_conn.tcp_connected and self._conn_reusable and err is None:
                 # Note that we don't reset read_cb; if more bytes come in before
                 # the next request, we'll still get them.
                 _idle_pool.release(self._tcp_conn)
             else:
                 self._tcp_conn.close()
                 self._tcp_conn = None
-        self.res_end_cb(complete)
-
-    def _input_extra(self, chunk):
-        self._input_body(chunk) # Tell the application about the extra data
-        self._input_end(False) # ... and then end the response. FIXME: won't work with pipelining
+        self.res_end_cb(err)
 
     # misc
 
-    def _handle_error(self, status_code, status_phrase, body, persist=False):
+    def _handle_error(self, err, detail):
         assert self._input_state == WAITING
         self._input_delimit = CLOSE
+        status_code, status_phrase = err.get('status', ('504', 'Gateway Timeout'))
+        hdrs = [
+            ('Content-Type', 'text/plain'),
+            ('Connection', 'close'),
+        ]
+        body = err['desc']
         self.res_body_cb, self.res_end_cb = self.res_start_cb(
-              "1.1", status_code, status_phrase, [], dummy)
+              "1.1", status_code, status_phrase, hdrs, dummy)
         self.res_body_cb(str(body))
-        self._input_end(persist)
+        self._input_end(err, detail)
 
 
 class _HttpConnectionPool:
@@ -274,7 +281,9 @@ def test(request_uri):
         print
         def body(chunk):
             print chunk
-        def done(complete):
+        def done(err):
+            if err:
+                print "*** ERROR: %s (%s)" % (err['desc'], err['detail'])
             push_tcp.stop()
         return body, done
     def req_pause(paused):
@@ -285,4 +294,5 @@ def test(request_uri):
     push_tcp.run()
             
 if __name__ == "__main__":
+    import sys
     test(sys.argv[1])

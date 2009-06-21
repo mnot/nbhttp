@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 
+"""\
+shared HTTP infrastructure
 """
-nbhttp.common - shared HTTP infrastructure
 
+__author__ = "Mark Nottingham <mnot@mnot.net>"
+__copyright__ ="""\
 Copyright (c) 2008-2009 Mark Nottingham
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -42,6 +45,8 @@ hop_by_hop_hdrs = ['connection', 'keep-alive', 'proxy-authenticate',
                    'upgrade']
 
 
+from error import *
+
 class HttpMessageParser:
     """
     This is a base class for something that has to parse HTTP messages, request
@@ -56,18 +61,15 @@ class HttpMessageParser:
         self._input_body_left = 0
 
     def _input_start(self, top_line, hdr_tuples, conn_tokens, transfer_codes, content_length):
-        # MUST return (float version, boolean allows_body)
+        # MUST return boolean allows_body
         raise NotImplementedError
 
     def _input_body(self, chunk):
         raise NotImplementedError
 
-    def _input_end(self, complete):
+    def _input_end(self, err=None):
         raise NotImplementedError
     
-    def _input_extra(self, chunk):
-        raise NotImplementedError
-        
     def _handle_input(self, instr):
         if self._input_buffer != "":
             instr = self._input_buffer + instr # will need to move to a list if writev comes around
@@ -80,10 +82,11 @@ class HttpMessageParser:
                 self._input_buffer = instr
         elif self._input_state == HEADERS_DONE:
             if self._input_delimit == NONE: # a message without a body
-                self._input_end(True)
+                if instr:
+                    self._input_end(ERR_EXTRA_DATA, instr) # FIXME: will not work with pipelining
+                else:
+                    self._input_end()
                 self._input_state = WAITING
-                if instr: # FIXME: will not work with pipelining
-                    self._input_extra(instr)
             elif self._input_delimit == CLOSE:
                 self._input_body(instr)
             elif self._input_delimit == CHUNKED:
@@ -101,11 +104,11 @@ class HttpMessageParser:
                         self._input_body_left -= len(instr)
                 elif self._input_body_left == 0: # done
                     if len(instr) >= 2 and instr[:2] == linesep:
-                        self._input_end(True)
+                        self._input_end()
                         self._input_state = WAITING
                         self._handle_input(instr[2:])
                     elif hdr_end.search(instr):
-                        self._input_end(True)
+                        self._input_end()
                         self._input_state = WAITING
                         trailers, rest = hdr_end.split(instr, 1) # TODO: process trailers
                         self._handle_input(rest)
@@ -123,7 +126,11 @@ class HttpMessageParser:
                         return self._handle_input(rest)
                     if ";" in chunk_size: # ignore chunk extensions
                         chunk_size = chunk_size.split(";", 1)[0]
-                    self._input_body_left = int(chunk_size, 16) # TODO: handle bad chunks
+                    try:
+                        self._input_body_left = int(chunk_size, 16)
+                    except ValueError:
+                        self._input_end(ERR_CHUNK, chunk_size)
+                        return
                     self._handle_input(rest)
             elif self._input_delimit == COUNTED:
                 assert self._input_body_left >= 0, \
@@ -134,9 +141,9 @@ class HttpMessageParser:
                     self._input_state = WAITING
                     if instr[self._input_body_left:]:
                         # This will catch extra input that isn't on packet boundaries.
-                        self._input_extra(instr[self._input_body_left:])
+                        self._input_end(ERR_EXTRA_DATA, instr[self._input_body_left:])
                     else:
-                        self._input_end(True) # 
+                        self._input_end() 
                 else: # got some of it
                     self._input_body(instr)
                     self._input_body_left -= len(instr)
@@ -156,12 +163,12 @@ class HttpMessageParser:
         conn_tokens = []
         transfer_codes = []
         content_length = None
-        for line in hdr_lines:
+        for line in hdr_lines: # TODO: header folding
             try:
                 fn, fv = line.split(":", 1)
                 hdr_tuples.append((fn, fv))
-            except ValueError, why:
-                raise # FIXME: bad header
+            except ValueError:
+                continue # TODO: is this the right thing to do?
             f_name = fn.strip().lower()
             f_val = fv.strip()
 
@@ -171,10 +178,12 @@ class HttpMessageParser:
             elif f_name == "transfer-encoding":
                 transfer_codes += [v.strip().lower() for v in f_val.split(',')]
             elif f_name == "content-length":
+                if content_length != None:
+                    continue # ignore any C-L past the first. 
                 try:
-                    content_length = int(f_val) # FIXME: barf on more than one C-L
-                except ValueError, why:
-                    pass
+                    content_length = int(f_val)
+                except ValueError:
+                    continue
 
         # ignore content-length if transfer-encoding is present
         if transfer_codes != [] and content_length != None:
@@ -182,7 +191,7 @@ class HttpMessageParser:
             content_length = None 
 
         try:
-            version, allows_body = self._input_start(top_line, hdr_tuples, 
+            allows_body = self._input_start(top_line, hdr_tuples, 
                                     conn_tokens, transfer_codes, content_length)
         except ValueError: # parsing error of some kind; abort.
             return ""
@@ -202,9 +211,8 @@ class HttpMessageParser:
                 self._input_body_left = content_length
             elif 'close' in conn_tokens: # FIXME: this doesn't make sense for requests
                 self._input_delimit = CLOSE
-            else: # assume 0 length body
-                self._input_delimit = COUNTED
-                self._input_body_left = 0
+            else: 
+                self._input_delimit = NONE
         return rest
     
 def dummy(*args, **kw):
