@@ -20,13 +20,13 @@ Call req_start to begin a request. It takes the following arguments:
   - req_body_pause (callable)
 and returns:
   - req_body (callable)
-  - req_end (callable)
+  - req_done (callable)
     
 Call req_body to send part of the request body. It takes the following 
 argument:
   - chunk (string)
 
-Call req_end when the request is complete, whether or not it contains a 
+Call req_done when the request is complete, whether or not it contains a 
 body. It takes the following argument:
   - err (error dictionary)
 
@@ -58,7 +58,7 @@ Where possible, errors in the response will be indicated with the appropriate
 5xx HTTP status code (i.e., by calling res_start, res_body and res_done with
 an error dictionary). However, if a response has already been started, the
 connection will be dropped (for example, when the response chunking or
-indicated length are incorrect). In these cases, res_end will still be called
+indicated length are incorrect). In these cases, res_done will still be called
 with the appropriate error dictionary.
 """
 
@@ -105,7 +105,7 @@ class Client(HttpMessageParser):
         HttpMessageParser.__init__(self)
         self.res_start_cb = res_start_cb
         self.res_body_cb = None
-        self.res_end_cb = None
+        self.res_done_cb = None
         self.method = None
         self.uri = None
         self.req_hdrs = []
@@ -189,7 +189,7 @@ class Client(HttpMessageParser):
         assert self._req_state == HEADERS_DONE
         self._req_state = WAITING
         if err:
-            self.res_body_cb, self.res_end_cb = dummy, dummy
+            self.res_body_cb, self.res_done_cb = dummy, dummy
             self._tcp_conn.close()
             self._tcp_conn = None
         elif self._req_delimit == NONE:
@@ -281,7 +281,7 @@ class Client(HttpMessageParser):
             if (res_version == 1.0 and 'keep-alive' in conn_tokens) or \
                 res_version > 1.0:
                 self._conn_reusable = True
-        self.res_body_cb, self.res_end_cb = self.res_start_cb(
+        self.res_body_cb, self.res_done_cb = self.res_start_cb(
                         res_version, res_code, res_phrase, hdr_tuples, self.res_body_pause)
         allows_body = (res_code not in no_body_status) or (self.method == "HEAD")
         return allows_body 
@@ -300,7 +300,7 @@ class Client(HttpMessageParser):
             else:
                 self._tcp_conn.close()
                 self._tcp_conn = None
-        self.res_end_cb()
+        self.res_done_cb()
 
     def _input_error(self, err, detail=None):
         "Indicate a parsing problem with the response body."
@@ -311,7 +311,7 @@ class Client(HttpMessageParser):
             self._tcp_conn = None
             if detail:
                 err['detail'] = detail
-            self.res_end_cb(err)
+            self.res_done_cb(err)
 
     # misc
 
@@ -332,10 +332,10 @@ class Client(HttpMessageParser):
         body = err['desc']
         if err.has_key('detail'):
             body += " (%s)" % err['detail']
-        self.res_body_cb, self.res_end_cb = self.res_start_cb(
+        self.res_body_cb, self.res_done_cb = self.res_start_cb(
               "1.1", status_code, status_phrase, hdrs, dummy)
         self.res_body_cb(str(body))
-        self.res_end_cb(err)
+        self.res_done_cb(err)
 
 
 class _HttpConnectionPool:

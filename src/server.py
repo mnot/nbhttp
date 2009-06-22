@@ -22,13 +22,13 @@ req_start is called when a request starts. It must take the following arguments:
   - req_body_pause (callable)
 and return:
   - req_body (callable)
-  - req_end (callable)
+  - req_done (callable)
     
 req_body is called when part of the request body is available. It must take the 
 following argument:
   - chunk (string)
 
-req_end is called when the request is complete, whether or not it contains a 
+req_done is called when the request is complete, whether or not it contains a 
 body. It must take the following argument:
   - err (error dictionary)
 
@@ -121,7 +121,7 @@ class HttpServerConnection(HttpMessageParser):
         HttpMessageParser.__init__(self)
         self.request_handler = request_handler
         self.req_body_cb = None
-        self.req_end_cb = None
+        self.req_done_cb = None
         self.method = None
         self.req_version = None
         self._tcp_conn = tcp_conn
@@ -184,7 +184,7 @@ class HttpServerConnection(HttpMessageParser):
         indicating that an HTTP-specific (i.e., non-application) error occured
         in the generation of the response; this is useful for debugging.
         """
-        log.debug("%s server res_end" % id(self))
+        log.debug("%s server res_done" % id(self))
         assert self._res_state == HEADERS_DONE
         self._res_state = WAITING
         if err:
@@ -244,7 +244,7 @@ class HttpServerConnection(HttpMessageParser):
         self.connection_hdr = conn_tokens
 
         log.info("%s server req_start %s %s %s" % (id(self), method, uri, self.req_version))
-        self.req_body_cb, self.req_end_cb = self.request_handler(
+        self.req_body_cb, self.req_done_cb = self.request_handler(
                 method, uri, hdr_tuples, self.res_start, self.req_body_pause)
         allows_body = (content_length) or (transfer_codes != [])
         return allows_body
@@ -255,7 +255,7 @@ class HttpServerConnection(HttpMessageParser):
     
     def _input_end(self):
         "Indicate that the request body is complete."
-        self.req_end_cb()
+        self.req_done_cb()
 
     def _input_error(self, err, detail=None):
         "Indicate a parsing problem with the request body."
@@ -265,7 +265,7 @@ class HttpServerConnection(HttpMessageParser):
             err['detail'] = detail
         self._tcp_conn.close()
         self._tcp_conn = None
-        self.req_end_cb(err)
+        self.req_done_cb(err)
 
     def _handle_error(self, err, detail=None):
         "Handle a problem with the request by generating an appropriate response."
