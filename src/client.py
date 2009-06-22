@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Non-Blocking HTTP client library
+Non-Blocking HTTP Client
 
 This library allow implementation of an HTTP/1.1 client that is "non-blocking,"
 "asynchronous" and "event-driven" -- i.e., it achieves very high performance
