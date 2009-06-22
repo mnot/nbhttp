@@ -67,7 +67,10 @@ class HttpMessageParser:
     def _input_body(self, chunk):
         raise NotImplementedError
 
-    def _input_end(self, err=None):
+    def _input_end(self):
+        raise NotImplementedError
+    
+    def _input_error(self, err, detail=None):
         raise NotImplementedError
     
     def _handle_input(self, instr):
@@ -83,7 +86,7 @@ class HttpMessageParser:
         elif self._input_state == HEADERS_DONE:
             if self._input_delimit == NONE: # a message without a body
                 if instr:
-                    self._input_end(ERR_EXTRA_DATA, instr) # FIXME: will not work with pipelining
+                    self._input_error(ERR_EXTRA_DATA, instr) # FIXME: will not work with pipelining
                 else:
                     self._input_end()
                 self._input_state = WAITING
@@ -129,8 +132,8 @@ class HttpMessageParser:
                     try:
                         self._input_body_left = int(chunk_size, 16)
                     except ValueError:
-                        self._input_end(ERR_CHUNK, chunk_size)
-                        return
+                        self._input_error(ERR_CHUNK, chunk_size)
+                        return # blow up if we can't proces a chunk.
                     self._handle_input(rest)
             elif self._input_delimit == COUNTED:
                 assert self._input_body_left >= 0, \
@@ -141,7 +144,7 @@ class HttpMessageParser:
                     self._input_state = WAITING
                     if instr[self._input_body_left:]:
                         # This will catch extra input that isn't on packet boundaries.
-                        self._input_end(ERR_EXTRA_DATA, instr[self._input_body_left:])
+                        self._input_error(ERR_EXTRA_DATA, instr[self._input_body_left:])
                     else:
                         self._input_end() 
                 else: # got some of it
@@ -168,7 +171,7 @@ class HttpMessageParser:
                 fn, fv = line.split(":", 1)
                 hdr_tuples.append((fn, fv))
             except ValueError:
-                continue # TODO: is this the right thing to do?
+                continue # TODO: flesh out bad header handling
             f_name = fn.strip().lower()
             f_val = fv.strip()
 
@@ -205,11 +208,11 @@ class HttpMessageParser:
                     self._input_delimit = CHUNKED
                     self._input_body_left = -1 # flag that we don't know
                 else:
-                    self._input_delimit = CLOSE # FYI, doesn't make sense for requests
+                    self._input_delimit = CLOSE
             elif content_length != None:
                 self._input_delimit = COUNTED
                 self._input_body_left = content_length
-            elif 'close' in conn_tokens: # FIXME: this doesn't make sense for requests
+            elif 'close' in conn_tokens:
                 self._input_delimit = CLOSE
             else: 
                 self._input_delimit = NONE
@@ -217,3 +220,15 @@ class HttpMessageParser:
     
 def dummy(*args, **kw):
     pass
+
+def header_dict(header_tuple, strip=None):
+    if strip == None:
+        strip = []
+    return dict([(n.strip().lower(), v.strip()) for (n,v) in header_tuple])
+
+def get_hdr(hdr_tuples, name):
+    return [v.strip() for v in sum(
+               [l.split(',') for l in 
+                    [i[1] for i in hdr_tuples if i[0].lower() == name]
+                ]
+            , [])]

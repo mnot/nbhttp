@@ -2,10 +2,7 @@
 from client import Client
 from server import Server
 from push_tcp import run, stop, schedule
-from common import dummy
+from common import dummy, header_dict
 
-def header_dict(header_tuple, strip=None):
-    if strip == None:
-        strip = []
-    return dict([(n.strip().lower(), v.strip()) for (n,v) in header_tuple])
+
 

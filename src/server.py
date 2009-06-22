@@ -42,7 +42,7 @@ from error import *
 
 logging.basicConfig()
 log = logging.getLogger('server')
-log.setLevel(logging.WARNING)
+log.setLevel(logging.DEBUG)
 
 
 class Server:
@@ -97,7 +97,7 @@ class HttpServerConnection(HttpMessageParser):
             res_top.append("Transfer-Encoding: chunked")
         else:
             self._res_delimit = CLOSE
-            res_top.append("Connection: close, default, %s" % self.req_version)
+            res_top.append("Connection: close")
         res_top.append(linesep)
         self._tcp_conn.write(linesep.join(res_top))
         self._res_state = HEADERS_DONE
@@ -105,28 +105,29 @@ class HttpServerConnection(HttpMessageParser):
 
     def res_body(self, data):
         log.debug("%s server res_body %s " % (id(self), len(data)))
-        assert self._res_state == HEADERS_DONE, self._res_state
+        assert self._res_state == HEADERS_DONE
         # TODO: if we sent C-L and we've written more than that many bytes, blow up.
         if self._res_delimit == CHUNKED:
-            self._tcp_conn.write("%s\r\n%s\r\n" % (hex(len(data))[2:], data))
+            self._tcp_conn.write("%s\r\n%s\r\n" % (hex(len(data))[2:], data)) # FIXME: why 2:?
         else:
             self._tcp_conn.write("%s" % data)
 
     def res_done(self, err=None):
         log.debug("%s server res_end" % id(self))
-        assert self._res_state == HEADERS_DONE, self._res_state
+        assert self._res_state == HEADERS_DONE
         self._res_state = WAITING
-        # TODO: if we sent C-L and we haven't written that many bytes, blow up.
         if err:
-            # TODO: serialise error, if possible
-            self._tcp_conn.close()  # FIXME: is this necessary?         
+            self._tcp_conn.close() # FIXME: need to see if it's a recoverable error...
         elif self._res_delimit == NONE:
             pass
         elif self._res_delimit == CHUNKED:
             self._tcp_conn.write("0\r\n\r\n") # We don't support trailers
         elif self._res_delimit == CLOSE:
             self._tcp_conn.close()
-         # TODO: cleanup if prematurely aborted
+        elif self._res_delimit == COUNTED:
+            pass # TODO: double-check the length
+        else:
+            raise AssertionError, "Unknown response delimiter"
 
     def req_body_pause(self, paused):
         if self._tcp_conn and self._tcp_conn.tcp_connected:
@@ -159,9 +160,9 @@ class HttpServerConnection(HttpMessageParser):
             uri, req_version = _req_line.rsplit(None, 1)
             self.req_version = float(req_version.rsplit('/', 1)[1])
         except ValueError, why:
-            self._handle_error(ERR_HTTP_VERSION, why)
+            self._handle_error(ERR_HTTP_VERSION, top_line) # FIXME: more fine-grained
             raise ValueError
-        if req_version == 1.1 and 'host' not in [ k.strip().lower() for (k,v) in hdr_tuples]:
+        if self.req_version == 1.1 and 'host' not in [ k.strip().lower() for (k,v) in hdr_tuples]:
             self._handle_error(ERR_HOST_REQ)
             raise ValueError
 
@@ -172,16 +173,23 @@ class HttpServerConnection(HttpMessageParser):
         self.req_body_cb, self.req_end_cb = self.request_handler(
                 method, uri, hdr_tuples, self.res_start, self.req_body_pause)
         allows_body = (content_length) or (transfer_codes != [])
-        return req_version, allows_body
+        return allows_body
 
     def _input_body(self, chunk):
         self.req_body_cb(chunk)
     
-    def _input_end(self, err=None, detail=None):
-        if err and detail:
+    def _input_end(self):
+        self.req_end_cb()
+
+    def _input_error(self, err, detail=None):
+        if self._res_state == WAITING:
+            self._handle_error(err, detail)
+        if detail:
             err['detail'] = detail
-        self.req_end_cb(err) #FIXME: is this the right place to send a parsing error?
-                 
+        self._tcp_conn.close()
+        self._tcp_conn = None
+        self.req_end_cb(err)
+
     def _handle_error(self, err, detail=None):
 #        self._queue.append(ErrorHandler(status_code, status_phrase, body, self))
         assert self._res_state == WAITING
@@ -190,13 +198,14 @@ class HttpServerConnection(HttpMessageParser):
         status_code, status_phrase = err.get('status', ('400', 'Bad Request'))
         hdrs = [
             ('Content-Type', 'text/plain'),
-            ('Connection', 'close'),
         ]
         body = err['desc']
+        if err.has_key('detail'):
+            body += " (%s)" % err['detail']
         self.res_start(status_code, status_phrase, hdrs, dummy)
         self.res_body(body)
-        self.res_done(err)
-    
+        self.res_done()
+
     
 def test_handler(method, uri, hdrs, res_start, req_pause):
     code = "200"

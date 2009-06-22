@@ -46,7 +46,7 @@ ERR_URL = {
     'desc': "Invalid URI",
     'status': ("400", "Bad Request"),
 }
-ERR_CL_REQ = {
+ERR_LEN_REQ = {
     'desc': "Content-Length required",
     'status': ("411", "Length Required"),
 }

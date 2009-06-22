@@ -34,10 +34,9 @@ from common import HttpMessageParser, \
     CLOSE, COUNTED, CHUNKED, NONE, \
     WAITING, HEADERS_DONE, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
-    linesep, dummy
+    linesep, dummy, get_hdr
 from error import *
 
-# TODO: pipelining
 # TODO: proxy support
 
 class Client(HttpMessageParser):
@@ -54,6 +53,7 @@ class Client(HttpMessageParser):
         self._tcp_conn = None
         self._conn_reusable = False
         self._req_state = WAITING
+        self._req_delimit = None
         self._req_content_length = None
         self._req_buffer = []
         self._req_body_pause_cb = None
@@ -88,11 +88,18 @@ class Client(HttpMessageParser):
         # clean req headers
         req_hdrs = [i for i in req_hdrs \
                     if not i[0].lower() in ['host'] + hop_by_hop_hdrs ]
+        self._req_delimit = NONE # default
         try:
             self._req_content_length = int([i[1] for i in req_hdrs \
                                     if i[0].lower() == 'content-length'].pop(0))
+            self._req_delimit = COUNTED
         except IndexError:
             self._req_content_length = None
+        transfer_codings = get_hdr(req_hdrs, 'transfer-encoding')
+        if transfer_codings:
+            self._req_delimit = CHUNKED
+            if self._req_content_length:
+                self._req_content_length = None     
         req_hdrs.append(("Host", authority))
         req_hdrs.append(("Connection", "keep-alive"))
         uri = urlunsplit(('', '', path, query, ''))
@@ -107,9 +114,12 @@ class Client(HttpMessageParser):
         """
         assert self._req_state == HEADERS_DONE
         if not data: return
-        if self._req_content_length == None: # TODO: chunked requests
-            return self._handle_error(ERR_CL_REQ)
-        self._req_buffer.append(data)
+        if self._req_delimit == CHUNKED:
+            self._req_buffer.append("%s\r\n%s\r\n" % (hex(len(data))[2:], data)) # FIXME: why [2:]?
+        elif self._req_delimit == COUNTED:
+            self._req_buffer.append(data)
+        else:
+            self._handle_error(ERR_LEN_REQ)
         if self._tcp_conn and self._tcp_conn.tcp_connected:
             self._tcp_conn.write("".join(self._req_buffer))
         self._req_body_sent += len(data)
@@ -122,6 +132,19 @@ class Client(HttpMessageParser):
         """
         assert self._req_state == HEADERS_DONE
         self._req_state = WAITING
+        if err:
+            self.res_body_cb, self.res_end_cb = dummy, dummy
+            self._tcp_conn.close()
+            self._tcp_conn = None
+        elif self._req_delimit == NONE:
+            pass # request didn't have a body at all.
+        elif self._req_delimit == CHUNKED:
+            self._tcp_conn.write("0\r\n\r\n") # We don't support trailers
+        elif self._req_delimit == COUNTED:
+            pass # TODO: double-check the length
+        else:
+            raise AssertionError, "Unknown request delimiter"
+            
 
     def res_body_pause(self, paused):
         """
@@ -145,6 +168,7 @@ class Client(HttpMessageParser):
         return self._handle_input, self._conn_closed, self._req_body_pause
 
     def _handle_connect_error(self, host, port, err):
+        # FIXME: this may be called multiple times (e.g., timeout then refused)
         import os, types, socket
         if type(err) == types.IntType:
             err = os.strerror(err)
@@ -170,7 +194,7 @@ class Client(HttpMessageParser):
                 _idle_pool.attach(self._tcp_conn.host, self._tcp_conn.port, 
                     self._handle_connect, self._handle_connect_error)                
             else:
-                self._input_end((ERR_CONNECT, "Server closed the connection."))
+                self._input_error((ERR_CONNECT, "Server closed the connection."))
 
     def _req_body_pause(self, paused):
         if self._req_body_pause_cb:
@@ -202,34 +226,49 @@ class Client(HttpMessageParser):
     def _input_body(self, chunk):
         self.res_body_cb(chunk)
         
-    def _input_end(self, err=None, detail=None):
-        if err and detail:
-            err['detail'] = detail
+    def _input_end(self):
         if self._tcp_conn:
-            if self._tcp_conn.tcp_connected and self._conn_reusable and err is None:
+            if self._tcp_conn.tcp_connected and self._conn_reusable:
                 # Note that we don't reset read_cb; if more bytes come in before
                 # the next request, we'll still get them.
                 _idle_pool.release(self._tcp_conn)
             else:
                 self._tcp_conn.close()
                 self._tcp_conn = None
-        self.res_end_cb(err)
+        self.res_end_cb()
+
+    def _input_error(self, err, detail=None):
+        if self._input_state == WAITING:
+            self._handle_error(err, detail)
+        else:
+            self._tcp_conn.close()
+            self._tcp_conn = None
+            if detail:
+                err['detail'] = detail
+            self.res_end_cb(err)
 
     # misc
 
-    def _handle_error(self, err, detail):
+    def _handle_error(self, err, detail=None):
         assert self._input_state == WAITING
         self._input_delimit = CLOSE
+        if self._tcp_conn:
+            self._tcp_conn.close()
+            self._tcp_conn = None
+        if detail:
+            err['detail'] = detail
         status_code, status_phrase = err.get('status', ('504', 'Gateway Timeout'))
         hdrs = [
             ('Content-Type', 'text/plain'),
             ('Connection', 'close'),
         ]
         body = err['desc']
+        if err.has_key('detail'):
+            body += " (%s)" % err['detail']
         self.res_body_cb, self.res_end_cb = self.res_start_cb(
               "1.1", status_code, status_phrase, hdrs, dummy)
         self.res_body_cb(str(body))
-        self._input_end(err, detail)
+        self.res_end_cb(err)
 
 
 class _HttpConnectionPool:
@@ -281,7 +320,7 @@ def test(request_uri):
         print
         def body(chunk):
             print chunk
-        def done(err):
+        def done(err=None):
             if err:
                 print "*** ERROR: %s (%s)" % (err['desc'], err['detail'])
             push_tcp.stop()
