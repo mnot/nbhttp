@@ -1,11 +1,14 @@
 #!/usr/bin/env python
 
-"""\
+"""
 shared HTTP infrastructure
+
+This module contains utility functions for nbhttp and a base class
+for the parsing portions of the client and server.
 """
 
 __author__ = "Mark Nottingham <mnot@mnot.net>"
-__copyright__ ="""\
+__copyright__ = """\
 Copyright (c) 2008-2009 Mark Nottingham
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -45,7 +48,41 @@ hop_by_hop_hdrs = ['connection', 'keep-alive', 'proxy-authenticate',
                    'upgrade']
 
 
-from error import *
+from error import ERR_EXTRA_DATA, ERR_CHUNK
+
+def dummy(*args, **kw):
+    "Dummy method that does nothing; useful to ignore a callback."
+    pass
+
+def header_dict(header_tuple, strip=None):
+    """
+    Given a header tuple, return a dictionary keyed upon the lower-cased
+    header names.
+    
+    If strip is defined, each header listed (by lower-cased name) will not be
+    returned in the dictionary.
+    """ 
+    # TODO: return a list of values; currently destructive.
+    if strip == None:
+        strip = []
+    return dict([(n.strip().lower(), v.strip()) for (n, v) in header_tuple])
+
+def get_hdr(hdr_tuples, name):
+    """
+    Given a list of (name, value) header tuples and a header name,
+    return a list of all values for that header.
+
+    This includes header lines with multiple values separated by a comma; 
+    such headers will be split into separate values. As a result, it is NOT
+    safe to use this on headers whose values may include a comma (e.g.,
+    Set-Cookie, or any value with a quoted string).
+    """
+    # TODO: support quoted strings
+    return [v.strip() for v in sum(
+               [l.split(',') for l in 
+                    [i[1] for i in hdr_tuples if i[0].lower() == name]
+                ]
+            , [])]
 
 class HttpMessageParser:
     """
@@ -61,19 +98,32 @@ class HttpMessageParser:
         self._input_body_left = 0
 
     def _input_start(self, top_line, hdr_tuples, conn_tokens, transfer_codes, content_length):
-        # MUST return boolean allows_body
+        """
+        Take the top set of headers from the input stream, parse them
+        and queue the request to be processed by the application.
+        
+        Returns boolean allows_body to indicate whether the message allows a 
+        body.
+        """
         raise NotImplementedError
 
     def _input_body(self, chunk):
+        "Process a body chunk from the wire."
         raise NotImplementedError
 
     def _input_end(self):
+        "Indicate that the response body is complete."
         raise NotImplementedError
     
     def _input_error(self, err, detail=None):
+        "Indicate a parsing problem with the body."
         raise NotImplementedError
     
     def _handle_input(self, instr):
+        """
+        Given a chunk of input, figure out what state we're in and handle it,
+        making the appropriate calls.
+        """
         if self._input_buffer != "":
             instr = self._input_buffer + instr # will need to move to a list if writev comes around
             self._input_buffer = ""
@@ -156,6 +206,11 @@ class HttpMessageParser:
             raise Exception, "Unknown state %s" % self._input_state
 
     def _parse_headers(self, instr):
+        """
+        Given a string that we knows contains a header block (possibly more), 
+        parse the headers out and return the rest. Calls self._input_start
+        to kick off processing.
+        """
         top, rest = hdr_end.split(instr, 1)
         hdr_lines = lws.sub(" ", top).splitlines()
         try:
@@ -218,17 +273,4 @@ class HttpMessageParser:
                 self._input_delimit = NONE
         return rest
     
-def dummy(*args, **kw):
-    pass
-
-def header_dict(header_tuple, strip=None):
-    if strip == None:
-        strip = []
-    return dict([(n.strip().lower(), v.strip()) for (n,v) in header_tuple])
-
-def get_hdr(hdr_tuples, name):
-    return [v.strip() for v in sum(
-               [l.split(',') for l in 
-                    [i[1] for i in hdr_tuples if i[0].lower() == name]
-                ]
-            , [])]
+    

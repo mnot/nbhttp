@@ -1,7 +1,65 @@
 #!/usr/bin/env python
 
 """
-asynchronous HTTP client library
+Non-Blocking HTTP client library
+
+This library allow implementation of an HTTP/1.1 client that is "non-blocking,"
+"asynchronous" and "event-driven" -- i.e., it achieves very high performance
+and concurrency, so long as the application code does not block (e.g.,
+upon network, disk or database access). Blocking on one response will block
+the entire client.
+
+Instantiate a Client with the following parameter:
+  - res_start (callable)
+  
+Call req_start to begin a request. It takes the following arguments:
+  - method (string)
+  - uri (string)
+  - req_hdrs (list of (name, value) tuples)
+  - res_start (callable)
+  - req_body_pause (callable)
+and returns:
+  - req_body (callable)
+  - req_end (callable)
+    
+Call req_body to send part of the request body. It takes the following 
+argument:
+  - chunk (string)
+
+Call req_end when the request is complete, whether or not it contains a 
+body. It takes the following argument:
+  - err (error dictionary)
+
+req_body_pause is called when the client needs you  to temporarily stop sending 
+the request body, or restart. It must take the following argument:
+  - paused (boolean; True means pause, False means unpause)
+    
+res_start is called to start the response, and must take the following 
+arguments:
+  - status_code (string)
+  - status_phrase (string)
+  - res_hdrs (list of (name, value) tuples)
+  - res_body_pause
+It must return:
+  - res_body (callable)
+  - res_done (callable)
+    
+res_body is called when part of the response body is available. It must accept
+the following parameter:
+  - chunk (string)
+  
+res_done is called when the response is finished, and must accept the 
+following argument if appropriate:
+  - err (error dictionary)
+    
+See the error module for the complete list of valid error dictionaries.
+
+Where possible, errors in the response will be indicated with the appropriate
+5xx HTTP status code (i.e., by calling res_start, res_body and res_done with
+an error dictionary). However, if a response has already been started, the
+connection will be dropped (for example, when the response chunking or
+indicated length are incorrect). In these cases, res_end will still be called
+with the appropriate error dictionary.
 """
 
 __author__ = "Mark Nottingham <mnot@mnot.net>"
@@ -35,11 +93,12 @@ from common import HttpMessageParser, \
     WAITING, HEADERS_DONE, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
     linesep, dummy, get_hdr
-from error import *
+from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ
 
 # TODO: proxy support
 
 class Client(HttpMessageParser):
+    "An asynchronous HTTP client."
     retry_limit = 2
 
     def __init__(self, res_start_cb):
@@ -108,28 +167,25 @@ class Client(HttpMessageParser):
         _idle_pool.attach(host, port, self._handle_connect, self._handle_connect_error)
         return self.req_body, self.req_done
 
-    def req_body(self, data):
-        """
-        Write data to the request body.
-        """
+    def req_body(self, chunk):
+        "Write data to the request body."
         assert self._req_state == HEADERS_DONE
-        if not data: return
+        if not chunk: 
+            return
         if self._req_delimit == CHUNKED:
-            self._req_buffer.append("%s\r\n%s\r\n" % (hex(len(data))[2:], data)) # FIXME: why [2:]?
+            self._req_buffer.append("%s\r\n%s\r\n" % (hex(len(chunk))[2:], chunk)) 
         elif self._req_delimit == COUNTED:
-            self._req_buffer.append(data)
+            self._req_buffer.append(chunk)
         else:
             self._handle_error(ERR_LEN_REQ)
         if self._tcp_conn and self._tcp_conn.tcp_connected:
             self._tcp_conn.write("".join(self._req_buffer))
-        self._req_body_sent += len(data)
+        self._req_body_sent += len(chunk)
         assert self._req_body_sent <= self._req_content_length, \
             "Too many request body bytes sent"
         
     def req_done(self, err=None):
-        """
-        Indicate that the request body is done.
-        """
+        "Indicate that the request body is done."
         assert self._req_state == HEADERS_DONE
         self._req_state = WAITING
         if err:
@@ -139,6 +195,7 @@ class Client(HttpMessageParser):
         elif self._req_delimit == NONE:
             pass # request didn't have a body at all.
         elif self._req_delimit == CHUNKED:
+            # FIXME: need to write to the buffer, not the conn
             self._tcp_conn.write("0\r\n\r\n") # We don't support trailers
         elif self._req_delimit == COUNTED:
             pass # TODO: double-check the length
@@ -147,15 +204,14 @@ class Client(HttpMessageParser):
             
 
     def res_body_pause(self, paused):
-        """
-        Temporarily stop sending the response body.
-        """
+        "Temporarily stop / restart sending the response body."
         if self._tcp_conn and self._tcp_conn.tcp_connected:
             self._tcp_conn.pause(paused)
         
     # Methods called by push_tcp
 
     def _handle_connect(self, tcp_conn):
+        "The connection has succeeded."
         self._tcp_conn = tcp_conn
         hdr_block = ["%s %s HTTP/1.1" % (self.method, self.uri)]
         hdr_block += ["%s: %s" % (k, v) for k, v in self.req_hdrs]
@@ -168,6 +224,7 @@ class Client(HttpMessageParser):
         return self._handle_input, self._conn_closed, self._req_body_pause
 
     def _handle_connect_error(self, host, port, err):
+        "The connection has failed."
         # FIXME: this may be called multiple times (e.g., timeout then refused)
         import os, types, socket
         if type(err) == types.IntType:
@@ -179,6 +236,7 @@ class Client(HttpMessageParser):
         self._handle_error(ERR_CONNECT, err)
 
     def _conn_closed(self):
+        "The server closed the connection."
         if self._input_buffer:
             self._handle_input("")
         if self._input_state == WAITING:
@@ -197,12 +255,17 @@ class Client(HttpMessageParser):
                 self._input_error((ERR_CONNECT, "Server closed the connection."))
 
     def _req_body_pause(self, paused):
+        "The client needs the application to pause/unpause the request body."
         if self._req_body_pause_cb:
             self._req_body_pause_cb(paused)
 
     # Methods called by common.HttpRequestParser
 
     def _input_start(self, top_line, hdr_tuples, conn_tokens, transfer_codes, content_length):
+        """
+        Take the top set of headers from the input stream, parse them
+        and queue the request to be processed by the application.
+        """
         try: 
             res_version, status_txt = top_line.split(None, 1)
             res_version = float(res_version.rsplit('/', 1)[1])
@@ -224,9 +287,11 @@ class Client(HttpMessageParser):
         return allows_body 
 
     def _input_body(self, chunk):
+        "Process a response body chunk from the wire."
         self.res_body_cb(chunk)
         
     def _input_end(self):
+        "Indicate that the response body is complete."
         if self._tcp_conn:
             if self._tcp_conn.tcp_connected and self._conn_reusable:
                 # Note that we don't reset read_cb; if more bytes come in before
@@ -238,6 +303,7 @@ class Client(HttpMessageParser):
         self.res_end_cb()
 
     def _input_error(self, err, detail=None):
+        "Indicate a parsing problem with the response body."
         if self._input_state == WAITING:
             self._handle_error(err, detail)
         else:
@@ -250,6 +316,7 @@ class Client(HttpMessageParser):
     # misc
 
     def _handle_error(self, err, detail=None):
+        "Handle a problem with the request by generating an appropriate response."
         assert self._input_state == WAITING
         self._input_delimit = CLOSE
         if self._tcp_conn:
@@ -272,16 +339,12 @@ class Client(HttpMessageParser):
 
 
 class _HttpConnectionPool:
-    """
-    A pool of idle TCP connections for use by the client.
-    """
+    "A pool of idle TCP connections for use by the client."
     connect_timeout = 3
     _conns = {}
 
     def attach(self, host, port, handle_connect, handle_connect_error):
-        """
-        Find an idle connection for (host, port), or create a new one.
-        """
+        "Find an idle connection for (host, port), or create a new one."
         while True:
             try:
                 tcp_conn = self._conns[(host, port)].pop()
@@ -295,11 +358,10 @@ class _HttpConnectionPool:
                 break
         
     def release(self, tcp_conn):
-        """
-        Add an idle connection back to the pool.
-        """
+        "Add an idle connection back to the pool."
         if tcp_conn.tcp_connected:
             def idle_close():
+                "Remove the connection from the pool when it closes."
                 try:
                     self._conns[(tcp_conn.host, tcp_conn.port)].remove(tcp_conn)
                 except ValueError:
@@ -313,8 +375,10 @@ class _HttpConnectionPool:
 _idle_pool = _HttpConnectionPool()
 
 
-def test(request_uri):
+def test_client(request_uri):
+    "A simple demonstration of a client."
     def printer(version, status, phrase, headers, res_pause):
+        "Print the response headers."
         print "HTTP/%s" % version, status, phrase
         print "\n".join(["%s:%s" % header for header in headers])
         print
@@ -325,13 +389,11 @@ def test(request_uri):
                 print "*** ERROR: %s (%s)" % (err['desc'], err['detail'])
             push_tcp.stop()
         return body, done
-    def req_pause(paused):
-        pass
     c = Client(printer)
-    req_body_write, req_body_done = c.req_start("GET", request_uri, [], req_pause)
-    req_body_done(True)
+    req_body_write, req_done = c.req_start("GET", request_uri, [], dummy)
+    req_done()
     push_tcp.run()
             
 if __name__ == "__main__":
     import sys
-    test(sys.argv[1])
+    test_client(sys.argv[1])

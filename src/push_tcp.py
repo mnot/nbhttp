@@ -155,6 +155,7 @@ except ImportError:
     event = None
 
 class _TcpConnectionBase(object):
+    "Base class for a TCP connection."
     write_bufsize = 16
     read_bufsize = 1024 * 16
     def __init__(self, sock, host, port, connect_error_handler=None):
@@ -194,10 +195,7 @@ class _TcpConnectionBase(object):
             self.read_cb(data)
         
     def conn_writable(self):
-        """
-        The connection is ready for writing; write any buffered
-        data.
-        """
+        "The connection is ready for writing; write any buffered data."
         if len(self._write_buffer) > 0:
             data = "".join(self._write_buffer)
             try:
@@ -206,7 +204,8 @@ class _TcpConnectionBase(object):
                 if why[0] in [errno.EBADF, errno.ECONNRESET, errno.EPIPE, errno.ETIMEDOUT]:
                     self.conn_closed()
                     return
-                elif why[0] in [errno.ECONNREFUSED, errno.ENETUNREACH] and self.connect_error_handler:
+                elif why[0] in [errno.ECONNREFUSED, errno.ENETUNREACH] and \
+                  self.connect_error_handler:
                     self.tcp_connected = False
                     self.connect_error_handler(self.host, self.port, why[0])
                     return
@@ -236,18 +235,21 @@ class _TcpConnectionBase(object):
             schedule(1, self.conn_closed)
 
     def write(self, data):
+        "Write data to the connection."
         assert not self._paused
         self._write_buffer.append(data)
         if self.pause_cb and len(self._write_buffer) > self.write_bufsize:
             self.pause_cb(True)
 
     def pause(self, paused):
+        """
+        Temporarily stop/start reading from the connection and pushing
+        it to the app.
+        """
         self._paused = paused
 
     def close(self):
-        """
-        Flush buffered data (if any) and close the connection. 
-        """
+        "Flush buffered data (if any) and close the connection."
         self.pause(True)
         if len(self._write_buffer) > 0:
             self._closing = True
@@ -257,6 +259,7 @@ class _TcpConnectionBase(object):
 
 
 class _AsyncoreConnection(_TcpConnectionBase, asyncore.dispatcher):
+    "A TCP connection using the asyncore library."
     def __init__(self, sock, host, port, error_handler):
         _TcpConnectionBase.__init__(self, sock, host, port, error_handler)
         asyncore.dispatcher.__init__(self, sock)
@@ -276,6 +279,7 @@ class _AsyncoreConnection(_TcpConnectionBase, asyncore.dispatcher):
 
 
 class _EventConnection(_TcpConnectionBase):
+    "A TCP connection using the event library."
     def __init__(self, sock, host, port, error_handler):
         _TcpConnectionBase.__init__(self, sock, host, port, error_handler)
         self._revent = event.read(sock, self.conn_readable)
@@ -307,6 +311,7 @@ class _EventConnection(_TcpConnectionBase):
         
 
 class _AsyncoreServer(asyncore.dispatcher):
+    "A TCP server using the asyncore library."
     def __init__(self, host, port, conn_handler):
         asyncore.dispatcher.__init__(self)
         self.host = host
@@ -330,6 +335,7 @@ class _AsyncoreServer(asyncore.dispatcher):
 
 
 class _EventServer:
+    "A TCP server using the event library."
     def __init__(self, host, port, conn_handler):
         self.host = host
         self.port = port
@@ -352,6 +358,7 @@ class _EventServer:
 
         
 class _AsyncoreClient(asyncore.dispatcher):
+    "A TCP client using the asyncore library."
     def __init__(self, host, port, conn_handler, connect_error_handler, timeout=None):
         asyncore.dispatcher.__init__(self)
         self.host = host
@@ -372,7 +379,8 @@ class _AsyncoreClient(asyncore.dispatcher):
     def handle_connect(self):
         if self._timeout_ev:
             self._timeout_ev.delete()
-        tcp_conn = _AsyncoreConnection(self.socket, self.host, self.port, self.connect_error_handler)
+        tcp_conn = _AsyncoreConnection(self.socket, self.host, self.port, 
+                                       self.connect_error_handler)
         tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
 
     def handle_error(self, err=None):
@@ -389,6 +397,7 @@ class _AsyncoreClient(asyncore.dispatcher):
         pass
 
 class _EventClient:
+    "A TCP client using the event library."
     def __init__(self, host, port, conn_handler, connect_error_handler, timeout=None):
         self.conn_handler = conn_handler
         self.connect_error_handler = connect_error_handler
@@ -420,6 +429,7 @@ class _EventClient:
 
 # adapted from Medusa
 class _AsyncoreLoop:
+    "Asyncore main loop + event scheduling."
     def __init__(self):
         self.events = []
         self.num_channels = 0
@@ -429,6 +439,7 @@ class _AsyncoreLoop:
         self.socket_map = asyncore.socket_map
 
     def run(self):
+        "Start the loop."
         last_event_check = 0
         while self.socket_map or self.events:
             now = time.time()
@@ -456,9 +467,11 @@ class _AsyncoreLoop:
             asyncore.poll(self.timeout)
             
     def stop(self):
+        "Stop the loop."
         self.socket_map = {}
             
     def schedule(self, delta, callback, *args):
+        "Schedule callable callback to be run in delta seconds with *args."
         def cb():
             callback(*args)
         new_event = (time.time() + delta, cb)

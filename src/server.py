@@ -1,7 +1,65 @@
 #!/usr/bin/env python
 
 """
-asynchronous HTTP server library
+Non-Blocking HTTP server library
+
+This library allow implementation of an HTTP/1.1 server that is "non-blocking,"
+"asynchronous" and "event-driven" -- i.e., it achieves very high performance
+and concurrency, so long as the application code does not block (e.g.,
+upon network, disk or database access). Blocking on one request will block
+the entire server.
+
+Instantiate a Server with the following parameters:
+  - host (string)
+  - port (int)
+  - req_start (callable)
+  
+req_start is called when a request starts. It must take the following arguments:
+  - method (string)
+  - uri (string)
+  - req_hdrs (list of (name, value) tuples)
+  - res_start (callable)
+  - req_body_pause (callable)
+and return:
+  - req_body (callable)
+  - req_end (callable)
+    
+req_body is called when part of the request body is available. It must take the 
+following argument:
+  - chunk (string)
+
+req_end is called when the request is complete, whether or not it contains a 
+body. It must take the following argument:
+  - err (error dictionary)
+
+Call req_body_pause when you want the server to temporarily stop sending the 
+request body, or restart. You must provide the following argument:
+  - paused (boolean; True means pause, False means unpause)
+    
+Call res_start when you want to start the response, and provide the following 
+arguments:
+  - status_code (string)
+  - status_phrase (string)
+  - res_hdrs (list of (name, value) tuples)
+  - res_body_pause
+It returns:
+  - res_body (callable)
+  - res_done (callable)
+    
+Call res_body to send part of the response body to the client. Provide the 
+following parameter:
+  - chunk (string)
+  
+Call res_done when the response is finished, and optionally provide the 
+following argument if appropriate:
+  - err (error dictionary)
+    
+See the error module for the complete list of valid error dictionaries.
+
+Where possible, errors in the request will be responded to with the appropriate
+4xx HTTP status code. However, if a response has already been started, the
+connection will be dropped (for example, when the request chunking or
+indicated length are incorrect).
 """
 
 __author__ = "Mark Nottingham <mnot@mnot.net>"
@@ -35,27 +93,30 @@ import push_tcp
 from common import HttpMessageParser, \
     CLOSE, COUNTED, CHUNKED, NONE, \
     WAITING, HEADERS_DONE, \
-    no_body_status, hop_by_hop_hdrs, \
+    hop_by_hop_hdrs, \
     linesep, dummy
 
-from error import *
+from error import ERR_HTTP_VERSION, ERR_HOST_REQ
 
 logging.basicConfig()
 log = logging.getLogger('server')
-log.setLevel(logging.DEBUG)
+log.setLevel(logging.WARNING)
 
 
 class Server:
+    "An asynchronous HTTP server."
     def __init__(self, host, port, request_handler):
         self.request_handler = request_handler
         self.server = push_tcp.create_server(host, port, self.handle_connection)
         
     def handle_connection(self, tcp_conn):
+        "Process a new push_tcp connection, tcp_conn."
         conn = HttpServerConnection(self.request_handler, tcp_conn)
         return conn._handle_input, conn._conn_closed, conn._res_body_pause
 
 
 class HttpServerConnection(HttpMessageParser):
+    "A handler for an HTTP server connection."
     def __init__(self, request_handler, tcp_conn):
         HttpMessageParser.__init__(self)
         self.request_handler = request_handler
@@ -70,6 +131,7 @@ class HttpServerConnection(HttpMessageParser):
         self._res_body_pause_cb = None
 
     def res_start(self, status_code, status_phrase, res_hdrs, res_body_pause):
+        "Start a response. Must only be called once per response."
         log.info("%s server res_start %s %s" % (id(self), status_code, status_phrase))
         assert self._res_state == WAITING, self._res_state
         self._res_body_pause_cb = res_body_pause
@@ -103,16 +165,25 @@ class HttpServerConnection(HttpMessageParser):
         self._res_state = HEADERS_DONE
         return self.res_body, self.res_done
 
-    def res_body(self, data):
-        log.debug("%s server res_body %s " % (id(self), len(data)))
+    def res_body(self, chunk):
+        "Send part of the response body. May be called zero to many times."
+        log.debug("%s server res_body %s " % (id(self), len(chunk)))
         assert self._res_state == HEADERS_DONE
         # TODO: if we sent C-L and we've written more than that many bytes, blow up.
         if self._res_delimit == CHUNKED:
-            self._tcp_conn.write("%s\r\n%s\r\n" % (hex(len(data))[2:], data)) # FIXME: why 2:?
+            self._tcp_conn.write("%s\r\n%s\r\n" % (hex(len(chunk))[2:], chunk)) # FIXME: why 2:?
         else:
-            self._tcp_conn.write("%s" % data)
+            self._tcp_conn.write("%s" % chunk)
 
     def res_done(self, err=None):
+        """
+        Signal the end of the response, whether or not there was a body. MUST be
+        called exactly once for each response. 
+        
+        If err is present, it is an error dictionary (see the error module)
+        indicating that an HTTP-specific (i.e., non-application) error occured
+        in the generation of the response; this is useful for debugging.
+        """
         log.debug("%s server res_end" % id(self))
         assert self._res_state == HEADERS_DONE
         self._res_state = WAITING
@@ -130,16 +201,19 @@ class HttpServerConnection(HttpMessageParser):
             raise AssertionError, "Unknown response delimiter"
 
     def req_body_pause(self, paused):
+        "Indicate that the server should pause (True) or unpause (False) the request."
         if self._tcp_conn and self._tcp_conn.tcp_connected:
             self._tcp_conn.pause(paused)
 
     # Methods called by push_tcp
 
     def _res_body_pause(self, paused):
+        "Pause/unpause sending the response body."
         if self._res_body_pause_cb:
             self._res_body_pause_cb(paused)
 
     def _conn_closed(self):
+        "The server connection has closed."
         if self._res_state != WAITING:
             pass # FIXME: any cleanup necessary?
 #        self.pause()
@@ -162,7 +236,7 @@ class HttpServerConnection(HttpMessageParser):
         except ValueError, why:
             self._handle_error(ERR_HTTP_VERSION, top_line) # FIXME: more fine-grained
             raise ValueError
-        if self.req_version == 1.1 and 'host' not in [ k.strip().lower() for (k,v) in hdr_tuples]:
+        if self.req_version == 1.1 and 'host' not in [ k.strip().lower() for (k, v) in hdr_tuples]:
             self._handle_error(ERR_HOST_REQ)
             raise ValueError
 
@@ -176,12 +250,15 @@ class HttpServerConnection(HttpMessageParser):
         return allows_body
 
     def _input_body(self, chunk):
+        "Process a request body chunk from the wire."
         self.req_body_cb(chunk)
     
     def _input_end(self):
+        "Indicate that the request body is complete."
         self.req_end_cb()
 
     def _input_error(self, err, detail=None):
+        "Indicate a parsing problem with the request body."
         if self._res_state == WAITING:
             self._handle_error(err, detail)
         if detail:
@@ -191,6 +268,7 @@ class HttpServerConnection(HttpMessageParser):
         self.req_end_cb(err)
 
     def _handle_error(self, err, detail=None):
+        "Handle a problem with the request by generating an appropriate response."
 #        self._queue.append(ErrorHandler(status_code, status_phrase, body, self))
         assert self._res_state == WAITING
         if detail:
@@ -208,19 +286,16 @@ class HttpServerConnection(HttpMessageParser):
 
     
 def test_handler(method, uri, hdrs, res_start, req_pause):
+    """
+    An extremely simple (and limited) server request_handler.
+    """
     code = "200"
     phrase = "OK"
     res_hdrs = [('Content-Type', 'text/plain')]
-    def res_pause(paused):
-        pass
-    res_body, res_done = res_start(code, phrase, hdrs, res_pause)
+    res_body, res_done = res_start(code, phrase, res_hdrs, dummy)
     res_body('foo!')
     res_done()
-    def req_body(data):
-        pass
-    def req_done(complete):
-        pass
-    return req_body, req_done
+    return dummy, dummy
     
 if __name__ == "__main__":
     sys.stderr.write("PID: %s\n" % os.getpid())
