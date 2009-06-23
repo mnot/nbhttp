@@ -236,7 +236,7 @@ class _TcpConnectionBase(object):
 
     def write(self, data):
         "Write data to the connection."
-        assert not self._paused
+#        assert not self._paused
         self._write_buffer.append(data)
         if self.pause_cb and len(self._write_buffer) > self.write_bufsize:
             self.pause_cb(True)
