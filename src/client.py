@@ -12,11 +12,11 @@ the entire client.
 Instantiate a Client with the following parameter:
   - res_start (callable)
   
-Call req_start to begin a request. It takes the following arguments:
+Call req_start on the Client instance to begin a request. It takes the following 
+arguments:
   - method (string)
   - uri (string)
   - req_hdrs (list of (name, value) tuples)
-  - res_start (callable)
   - req_body_pause (callable)
 and returns:
   - req_body (callable)
