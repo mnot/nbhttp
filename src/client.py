@@ -28,7 +28,7 @@ argument:
 
 Call req_done when the request is complete, whether or not it contains a 
 body. It takes the following argument:
-  - err (error dictionary)
+  - err (error dictionary, or None for no error)
 
 req_body_pause is called when the client needs you  to temporarily stop sending 
 the request body, or restart. It must take the following argument:
@@ -49,8 +49,8 @@ the following parameter:
   - chunk (string)
   
 res_done is called when the response is finished, and must accept the 
-following argument if appropriate:
-  - err (error dictionary)
+following argument:
+  - err (error dictionary, or None if no error)
     
 See the error module for the complete list of valid error dictionaries.
 
@@ -168,7 +168,7 @@ class Client(HttpMessageParser):
         return self.req_body, self.req_done
 
     def req_body(self, chunk):
-        "Write data to the request body."
+        "Send part of the request body. May be called zero to many times."
         assert self._req_state == HEADERS_DONE
         if not chunk: 
             return
@@ -184,8 +184,15 @@ class Client(HttpMessageParser):
         assert self._req_body_sent <= self._req_content_length, \
             "Too many request body bytes sent"
         
-    def req_done(self, err=None):
-        "Indicate that the request body is done."
+    def req_done(self, err):
+        """
+        Signal the end of the request, whether or not there was a body. MUST be
+        called exactly once for each request. 
+        
+        If err is not None, it is an error dictionary (see the error module)
+        indicating that an HTTP-specific (i.e., non-application) error occurred
+        while satisfying the request; this is useful for debugging.
+        """
         assert self._req_state == HEADERS_DONE
         self._req_state = WAITING
         if err:
@@ -300,7 +307,7 @@ class Client(HttpMessageParser):
             else:
                 self._tcp_conn.close()
                 self._tcp_conn = None
-        self.res_done_cb()
+        self.res_done_cb(None)
 
     def _input_error(self, err, detail=None):
         "Indicate a parsing problem with the response body."
@@ -384,14 +391,14 @@ def test_client(request_uri):
         print
         def body(chunk):
             print chunk
-        def done(err=None):
+        def done(err):
             if err:
                 print "*** ERROR: %s (%s)" % (err['desc'], err['detail'])
             push_tcp.stop()
         return body, done
     c = Client(printer)
     req_body_write, req_done = c.req_start("GET", request_uri, [], dummy)
-    req_done()
+    req_done(None)
     push_tcp.run()
             
 if __name__ == "__main__":

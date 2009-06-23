@@ -30,7 +30,7 @@ following argument:
 
 req_done is called when the request is complete, whether or not it contains a 
 body. It must take the following argument:
-  - err (error dictionary)
+  - err (error dictionary, or None for no error)
 
 Call req_body_pause when you want the server to temporarily stop sending the 
 request body, or restart. You must provide the following argument:
@@ -50,9 +50,9 @@ Call res_body to send part of the response body to the client. Provide the
 following parameter:
   - chunk (string)
   
-Call res_done when the response is finished, and optionally provide the 
+Call res_done when the response is finished, and provide the 
 following argument if appropriate:
-  - err (error dictionary)
+  - err (error dictionary, or None for no error)
     
 See the error module for the complete list of valid error dictionaries.
 
@@ -169,18 +169,20 @@ class HttpServerConnection(HttpMessageParser):
         "Send part of the response body. May be called zero to many times."
         log.debug("%s server res_body %s " % (id(self), len(chunk)))
         assert self._res_state == HEADERS_DONE
+        if not chunk: 
+            return
         # TODO: if we sent C-L and we've written more than that many bytes, blow up.
         if self._res_delimit == CHUNKED:
             self._tcp_conn.write("%s\r\n%s\r\n" % (hex(len(chunk))[2:], chunk)) # FIXME: why 2:?
         else:
             self._tcp_conn.write("%s" % chunk)
 
-    def res_done(self, err=None):
+    def res_done(self, err):
         """
         Signal the end of the response, whether or not there was a body. MUST be
         called exactly once for each response. 
         
-        If err is present, it is an error dictionary (see the error module)
+        If err is not None, it is an error dictionary (see the error module)
         indicating that an HTTP-specific (i.e., non-application) error occured
         in the generation of the response; this is useful for debugging.
         """
@@ -255,7 +257,7 @@ class HttpServerConnection(HttpMessageParser):
     
     def _input_end(self):
         "Indicate that the request body is complete."
-        self.req_done_cb()
+        self.req_done_cb(None)
 
     def _input_error(self, err, detail=None):
         "Indicate a parsing problem with the request body."
@@ -294,7 +296,7 @@ def test_handler(method, uri, hdrs, res_start, req_pause):
     res_hdrs = [('Content-Type', 'text/plain')]
     res_body, res_done = res_start(code, phrase, res_hdrs, dummy)
     res_body('foo!')
-    res_done()
+    res_done(None)
     return dummy, dummy
     
 if __name__ == "__main__":
