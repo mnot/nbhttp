@@ -48,7 +48,7 @@ hop_by_hop_hdrs = ['connection', 'keep-alive', 'proxy-authenticate',
                    'upgrade']
 
 
-from error import ERR_EXTRA_DATA, ERR_CHUNK
+from error import ERR_EXTRA_DATA, ERR_CHUNK, ERR_BODY_FORBIDDEN
 
 def dummy(*args, **kw):
     "Dummy method that does nothing; useful to ignore a callback."
@@ -136,7 +136,7 @@ class HttpMessageParser:
         elif self._input_state == HEADERS_DONE:
             if self._input_delimit == NONE: # a message without a body
                 if instr:
-                    self._input_error(ERR_EXTRA_DATA, instr) # FIXME: will not work with pipelining
+                    self._input_error(ERR_BODY_FORBIDDEN, instr) # FIXME: will not work with pipelining
                 else:
                     self._input_end()
                 self._input_state = WAITING

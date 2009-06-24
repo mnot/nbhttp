@@ -36,6 +36,10 @@ ERR_EXTRA_DATA = {
     'desc': "Extra data received",
 }
 
+ERR_BODY_FORBIDDEN = {
+    'desc': "This message does not allow a body",
+}
+
 ERR_HTTP_VERSION = {
     'desc': "Unrecognised HTTP version",  # FIXME: more specific status
 }
