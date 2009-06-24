@@ -131,14 +131,14 @@ class Client(HttpMessageParser):
         self._req_body_pause_cb = req_body_pause
         (scheme, authority, path, query, fragment) = urlsplit(uri)
         if scheme.lower() != 'http':
-            self._handle_error(ERR_URL)
+            self._handle_error(ERR_URL, "Only HTTP URLs are supported")
             return dummy, dummy
         if ":" in authority:
             host, port = authority.rsplit(":", 1)
             try:
                 port = int(port)
             except ValueError:
-                self._handle_error(ERR_URL)
+                self._handle_error(ERR_URL, "Non-integer port in URL")
                 return dummy, dummy
         else:
             host, port = authority, 80
