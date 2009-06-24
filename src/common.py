@@ -172,8 +172,12 @@ class HttpMessageParser:
                         # they really need to use CRLF
                         chunk_size, rest = instr.split("\r\n", 1)
                     except ValueError:
-                        # got a CRLF without anything behind it.. wait.
-                        self._input_buffer += instr
+                        # got a CRLF without anything behind it.. wait a bit
+                        if len(instr) > 256:
+                            # OK, this is absurd...
+                            self._input_error(ERR_CHUNK, instr)
+                        else:
+                            self._input_buffer += instr
                         return
                     if chunk_size.strip() == "": # ignore bare lines
                         return self._handle_input(rest)
@@ -183,7 +187,7 @@ class HttpMessageParser:
                         self._input_body_left = int(chunk_size, 16)
                     except ValueError:
                         self._input_error(ERR_CHUNK, chunk_size)
-                        return # blow up if we can't proces a chunk.
+                        return # blow up if we can't process a chunk.
                     self._handle_input(rest)
             elif self._input_delimit == COUNTED:
                 assert self._input_body_left >= 0, \
