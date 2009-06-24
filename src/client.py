@@ -311,14 +311,11 @@ class Client(HttpMessageParser):
 
     def _input_error(self, err, detail=None):
         "Indicate a parsing problem with the response body."
-        if self._input_state == WAITING:
-            self._handle_error(err, detail)
-        else:
-            self._tcp_conn.close()
-            self._tcp_conn = None
-            if detail:
-                err['detail'] = detail
-            self.res_done_cb(err)
+        self._tcp_conn.close()
+        self._tcp_conn = None
+        if detail:
+            err['detail'] = detail
+        self.res_done_cb(err)
 
     # misc
 
