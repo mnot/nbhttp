@@ -259,7 +259,7 @@ class Client(HttpMessageParser):
                 _idle_pool.attach(self._tcp_conn.host, self._tcp_conn.port, 
                     self._handle_connect, self._handle_connect_error)                
             else:
-                self._input_error((ERR_CONNECT, "Server closed the connection."))
+                self._input_error(ERR_CONNECT, "Server closed the connection.")
 
     def _req_body_pause(self, paused):
         "The client needs the application to pause/unpause the request body."
