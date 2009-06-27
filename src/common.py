@@ -271,10 +271,8 @@ class HttpMessageParser:
             elif content_length != None:
                 self._input_delimit = COUNTED
                 self._input_body_left = content_length
-            elif 'close' in conn_tokens:
-                self._input_delimit = CLOSE
             else: 
-                self._input_delimit = NONE
+                self._input_delimit = CLOSE
         return rest
     
     
