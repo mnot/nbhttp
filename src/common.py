@@ -42,6 +42,7 @@ CLOSE, COUNTED, CHUNKED, NONE = 0, 1, 2, 3
 WAITING, HEADERS_DONE = 1, 2
 
 idempotent_methods = ['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS', 'TRACE']
+safe_methods = ['GET', 'HEAD', 'OPTIONS', 'TRACE']
 no_body_status = ['100', '101', '204', '304']
 hop_by_hop_hdrs = ['connection', 'keep-alive', 'proxy-authenticate', 
                    'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 
