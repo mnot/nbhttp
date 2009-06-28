@@ -216,7 +216,7 @@ class HttpMessageParser:
         to kick off processing.
         """
         top, rest = hdr_end.split(instr, 1)
-        hdr_lines = lws.sub(" ", top).splitlines()
+        hdr_lines = lws.sub(" ", top).splitlines()   # Fold LWS
         try:
             top_line = hdr_lines.pop(0)
         except IndexError: # empty
