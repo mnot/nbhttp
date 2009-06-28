@@ -69,7 +69,7 @@ def header_dict(header_tuple, strip=None):
 
 def get_hdr(hdr_tuples, name):
     """
-    Given a list of (name, value) header tuples and a header name,
+    Given a list of (name, value) header tuples and a header name (lowercase),
     return a list of all values for that header.
 
     This includes header lines with multiple values separated by a comma; 
