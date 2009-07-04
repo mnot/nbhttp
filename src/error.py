@@ -47,7 +47,7 @@ ERR_HTTP_VERSION = {
 # client-specific errors
 
 ERR_URL = {
-    'desc': "Invalid URI",
+    'desc': "Unsupported or invalid URI",
     'status': ("400", "Bad Request"),
 }
 ERR_LEN_REQ = {
