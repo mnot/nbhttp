@@ -44,6 +44,10 @@ ERR_HTTP_VERSION = {
     'desc': "Unrecognised HTTP version",  # FIXME: more specific status
 }
 
+ERR_READ_TIMEOUT = {
+    'desc': "Read timeout", 
+}
+
 # client-specific errors
 
 ERR_URL = {
