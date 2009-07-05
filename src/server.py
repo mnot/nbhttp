@@ -261,10 +261,10 @@ class HttpServerConnection(HttpMessageParser):
 
     def _input_error(self, err, detail=None):
         "Indicate a parsing problem with the request body."
-        if detail:
-            err['detail'] = detail
-        self._tcp_conn.close()
-        self._tcp_conn = None
+        err['detail'] = detail
+        if self._tcp_conn:
+            self._tcp_conn.close()
+            self._tcp_conn = None
         self.req_done_cb(err)
 
     def _handle_error(self, err, detail=None):

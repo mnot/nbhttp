@@ -477,19 +477,24 @@ class _AsyncoreLoop:
     def schedule(self, delta, callback, *args):
         "Schedule callable callback to be run in delta seconds with *args."
         def cb():
-            callback(*args)
+            if callback:
+                callback(*args)
         new_event = (time.time() + delta, cb)
         events = self.events
         bisect.insort(events, new_event)
         class event_holder:
+            def __init__(self):
+                self._deleted = False
             def delete(self):
-                try:
-                    events.remove(new_event)
-                except ValueError: # already gone
-                    pass
+                if not self._deleted:
+                    try:
+                        events.remove(new_event)
+                        self._deleted = True
+                    except ValueError: # already gone
+                        pass
         return event_holder()
 
-if event:
+if False:
     create_client = _EventClient
     create_server = _EventServer
     schedule = event.timeout

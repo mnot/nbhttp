@@ -93,12 +93,14 @@ from common import HttpMessageParser, \
     WAITING, HEADERS_DONE, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
     linesep, dummy, get_hdr
-from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ
+from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ, ERR_READ_TIMEOUT
 
 # TODO: proxy support
 
 class Client(HttpMessageParser):
     "An asynchronous HTTP client."
+    connect_timeout = None
+    read_timeout = None
     retry_limit = 2
 
     def __init__(self, res_start_cb):
@@ -118,6 +120,7 @@ class Client(HttpMessageParser):
         self._req_body_pause_cb = None
         self._req_body_sent = 0
         self._retries = 0
+        self._timeout_ev = None
         
     def req_start(self, method, uri, req_hdrs, req_body_pause):
         """
@@ -164,7 +167,7 @@ class Client(HttpMessageParser):
         uri = urlunsplit(('', '', path, query, ''))
         self.method, self.uri, self.req_hdrs = method, uri, req_hdrs
         self._req_state = HEADERS_DONE
-        _idle_pool.attach(host, port, self._handle_connect, self._handle_connect_error)
+        _idle_pool.attach(host, port, self._handle_connect, self._handle_connect_error, self.connect_timeout)
         return self.req_body, self.req_done
 
     def req_body(self, chunk):
@@ -228,6 +231,9 @@ class Client(HttpMessageParser):
         if self._req_buffer: # TODO: combine into single write
             self._tcp_conn.write("".join(self._req_buffer))
             self._req_buffer = []
+        if self.read_timeout:
+            self._timeout_ev = push_tcp.schedule(
+                self.read_timeout, self._handle_error, ERR_READ_TIMEOUT)
         return self._handle_input, self._conn_closed, self._req_body_pause
 
     def _handle_connect_error(self, host, port, err):
@@ -246,6 +252,8 @@ class Client(HttpMessageParser):
         "The server closed the connection."
         if self._input_buffer:
             self._handle_input("")
+        if self._timeout_ev:
+            self._timeout_ev.delete()
         if self._input_state == WAITING:
             return # we've seen the whole body already, or nothing has happened yet.
         elif self._input_delimit == CLOSE:
@@ -257,7 +265,7 @@ class Client(HttpMessageParser):
                 self._input_state == WAITING:
                 self._retries += 1
                 _idle_pool.attach(self._tcp_conn.host, self._tcp_conn.port, 
-                    self._handle_connect, self._handle_connect_error)                
+                    self._handle_connect, self._handle_connect_error, self.connect_timeout)                
             else:
                 self._input_error(ERR_CONNECT, "Server closed the connection.")
 
@@ -273,6 +281,8 @@ class Client(HttpMessageParser):
         Take the top set of headers from the input stream, parse them
         and queue the request to be processed by the application.
         """
+        if self._timeout_ev:
+            self._timeout_ev.delete()
         try: 
             res_version, status_txt = top_line.split(None, 1)
             res_version = float(res_version.rsplit('/', 1)[1])
@@ -290,15 +300,25 @@ class Client(HttpMessageParser):
                 self._conn_reusable = True
         self.res_body_cb, self.res_done_cb = self.res_start_cb(
                         res_version, res_code, res_phrase, hdr_tuples, self.res_body_pause)
+        if self.read_timeout:
+            self._timeout_ev = push_tcp.schedule(
+                             self.read_timeout, self._input_error, ERR_READ_TIMEOUT)
         allows_body = (res_code not in no_body_status) or (self.method == "HEAD")
         return allows_body 
 
     def _input_body(self, chunk):
         "Process a response body chunk from the wire."
+        if self._timeout_ev:
+            self._timeout_ev.delete()
         self.res_body_cb(chunk)
+        if self.read_timeout:
+            self._timeout_ev = push_tcp.schedule(
+                             self.read_timeout, self._input_error, ERR_READ_TIMEOUT)
         
     def _input_end(self):
         "Indicate that the response body is complete."
+        if self._timeout_ev:
+            self._timeout_ev.delete()
         if self._tcp_conn:
             if self._tcp_conn.tcp_connected and self._conn_reusable:
                 # Note that we don't reset read_cb; if more bytes come in before
@@ -311,10 +331,12 @@ class Client(HttpMessageParser):
 
     def _input_error(self, err, detail=None):
         "Indicate a parsing problem with the response body."
-        self._tcp_conn.close()
-        self._tcp_conn = None
-        if detail:
-            err['detail'] = detail
+        if self._timeout_ev:
+            self._timeout_ev.delete()
+        if self._tcp_conn:
+            self._tcp_conn.close()
+            self._tcp_conn = None
+        err['detail'] = detail
         self.res_done_cb(err)
 
     # misc
@@ -323,6 +345,8 @@ class Client(HttpMessageParser):
         "Handle a problem with the request by generating an appropriate response."
         assert self._input_state == WAITING
         self._input_delimit = CLOSE
+        if self._timeout_ev:
+            self._timeout_ev.delete()
         if self._tcp_conn:
             self._tcp_conn.close()
             self._tcp_conn = None
@@ -344,17 +368,16 @@ class Client(HttpMessageParser):
 
 class _HttpConnectionPool:
     "A pool of idle TCP connections for use by the client."
-    connect_timeout = 3
     _conns = {}
 
-    def attach(self, host, port, handle_connect, handle_connect_error):
+    def attach(self, host, port, handle_connect, handle_connect_error, connect_timeout):
         "Find an idle connection for (host, port), or create a new one."
         while True:
             try:
                 tcp_conn = self._conns[(host, port)].pop()
             except (IndexError, KeyError):
                 push_tcp.create_client(host, port, handle_connect, handle_connect_error, 
-                                       self.connect_timeout)
+                                       connect_timeout)
                 break        
             if tcp_conn.tcp_connected:
                 tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = \
