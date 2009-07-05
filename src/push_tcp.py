@@ -494,7 +494,7 @@ class _AsyncoreLoop:
                         pass
         return event_holder()
 
-if False:
+if event:
     create_client = _EventClient
     create_server = _EventServer
     schedule = event.timeout
