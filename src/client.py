@@ -292,7 +292,7 @@ class Client(HttpMessageParser):
         try:
             res_code, res_phrase = status_txt.split(None, 1)
         except ValueError:
-            res_code = status_txt
+            res_code = status_txt.rstrip()
             res_phrase = ""
         if 'close' not in conn_tokens:
             if (res_version == 1.0 and 'keep-alive' in conn_tokens) or \
