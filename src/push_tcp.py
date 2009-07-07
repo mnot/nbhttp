@@ -473,6 +473,7 @@ class _AsyncoreLoop:
     def stop(self):
         "Stop the loop."
         self.socket_map = {}
+        self.events = []
             
     def schedule(self, delta, callback, *args):
         "Schedule callable callback to be run in delta seconds with *args."
