@@ -93,7 +93,7 @@ from common import HttpMessageParser, \
     WAITING, HEADERS_DONE, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
     linesep, dummy, get_hdr
-from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ, ERR_READ_TIMEOUT
+from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ, ERR_READ_TIMEOUT, ERR_HTTP_VERSION
 
 # TODO: proxy support
 
@@ -252,18 +252,18 @@ class Client(HttpMessageParser):
         "The server closed the connection."
         if self._input_buffer:
             self._handle_input("")
-        if self._timeout_ev:
-            self._timeout_ev.delete()
-        if self._input_state == WAITING:
-            return # we've seen the whole body already, or nothing has happened yet.
-        elif self._input_delimit == CLOSE:
+        if self._input_delimit == CLOSE:
             self._input_state = WAITING
             self._input_end()
+        elif self._input_state == WAITING:
+            return # we've seen the whole body already, or nothing has happened yet.
         else:
             if self.method in idempotent_methods and \
-                self._retries < self.retry_limit and \
-                self._input_state == WAITING:
+              self._retries < self.retry_limit and \
+              self._input_state == WAITING:
                 self._retries += 1
+                if self._timeout_ev:
+                    self._timeout_ev.delete()
                 _idle_pool.attach(self._tcp_conn.host, self._tcp_conn.port, 
                     self._handle_connect, self._handle_connect_error, self.connect_timeout)                
             else:
@@ -288,6 +288,7 @@ class Client(HttpMessageParser):
             res_version = float(res_version.rsplit('/', 1)[1])
             # TODO: check that the protocol is HTTP
         except (ValueError, IndexError):
+            self._handle_error(ERR_HTTP_VERSION, top_line)
             raise ValueError
         try:
             res_code, res_phrase = status_txt.split(None, 1)
