@@ -85,6 +85,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+import time
 from urlparse import urlsplit, urlunsplit
 
 import push_tcp
@@ -260,7 +261,7 @@ class Client(HttpMessageParser):
         else:
             if self.method in idempotent_methods and \
               self._retries < self.retry_limit and \
-              self._input_state == WAITING:
+              self._input_state == WAITING: # FIXME: look 5 lines above
                 self._retries += 1
                 if self._timeout_ev:
                     self._timeout_ev.delete()
@@ -345,7 +346,6 @@ class Client(HttpMessageParser):
     def _handle_error(self, err, detail=None):
         "Handle a problem with the request by generating an appropriate response."
         assert self._input_state == WAITING
-        self._input_delimit = CLOSE
         if self._timeout_ev:
             self._timeout_ev.delete()
         if self._tcp_conn:
@@ -361,10 +361,10 @@ class Client(HttpMessageParser):
         body = err['desc']
         if err.has_key('detail'):
             body += " (%s)" % err['detail']
-        self.res_body_cb, self.res_done_cb = self.res_start_cb(
+        res_body_cb, res_done_cb = self.res_start_cb(
               "1.1", status_code, status_phrase, hdrs, dummy)
-        self.res_body_cb(str(body))
-        self.res_done_cb(err)
+        res_body_cb(str(body))
+        push_tcp.schedule(0, res_done_cb, err)
 
 
 class _HttpConnectionPool:
