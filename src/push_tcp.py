@@ -185,7 +185,7 @@ class _TcpConnectionBase(object):
                 return
             elif why[0] in [errno.ECONNREFUSED, errno.ENETUNREACH] and self.connect_error_handler:
                 self.tcp_connected = False
-                self.connect_error_handler(self.host, self.port, why[0])
+                self.connect_error_handler(why[0])
                 return
             else:
                 raise
@@ -207,7 +207,7 @@ class _TcpConnectionBase(object):
                 elif why[0] in [errno.ECONNREFUSED, errno.ENETUNREACH] and \
                   self.connect_error_handler:
                     self.tcp_connected = False
-                    self.connect_error_handler(self.host, self.port, why[0])
+                    self.connect_error_handler(why[0])
                     return
                 else:
                     raise
@@ -226,7 +226,9 @@ class _TcpConnectionBase(object):
         and then call close_cb.
         """
         self.tcp_connected = False
-        if self.close_cb and not self._close_cb_called:
+        if self._close_cb_called:
+            return
+        elif self.close_cb:
             self._close_cb_called = True
             self.close_cb()
         else:
@@ -277,7 +279,7 @@ class _AsyncoreConnection(_TcpConnectionBase, asyncore.dispatcher):
     def handle_error(self):
         err = sys.exc_info()
         if issubclass(err[0], socket.error):
-            self.connect_error_handler(self.host, self.port, err[0])
+            self.connect_error_handler(err[0])
         else:
             raise
 
@@ -370,10 +372,11 @@ class _AsyncoreClient(asyncore.dispatcher):
         self.conn_handler = conn_handler
         self.connect_error_handler = connect_error_handler
         self._timeout_ev = None
+        self._conn_handled = False
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         if timeout:
             to_err = errno.ETIMEDOUT
-            self._timeout_ev = schedule(timeout, self.connect_error_handler, host, port, to_err)
+            self._timeout_ev = schedule(timeout, self.handle_error, to_err)
         # TODO: socket.getaddrinfo(); needs to be non-blocking.
         try:
             self.connect((host, port))
@@ -381,18 +384,22 @@ class _AsyncoreClient(asyncore.dispatcher):
             self.handle_error(why[0])
 
     def handle_connect(self):
-        if self._timeout_ev:
-            self._timeout_ev.delete()
-        tcp_conn = _AsyncoreConnection(self.socket, self.host, self.port, 
-                                       self.connect_error_handler)
-        tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
+        if not self._conn_handled:
+            self._conn_handled = True
+            if self._timeout_ev:
+                self._timeout_ev.delete()
+            tcp_conn = _AsyncoreConnection(self.socket, self.host, self.port, 
+                                           self.handle_error)
+            tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
 
     def handle_error(self, err=None):
-        if self._timeout_ev:
-            self._timeout_ev.delete()
-        if err == None:
-            t, err, tb = sys.exc_info()
-        self.connect_error_handler(self.host, self.port, err)
+        if not self._conn_handled:
+            self._conn_handled = True
+            if self._timeout_ev:
+                self._timeout_ev.delete()
+            if err == None:
+                t, err, tb = sys.exc_info()
+            self.connect_error_handler(self.host, self.port, err)
 
     def handle_read(self):
         pass
@@ -403,33 +410,46 @@ class _AsyncoreClient(asyncore.dispatcher):
 class _EventClient:
     "A TCP client using the event library."
     def __init__(self, host, port, conn_handler, connect_error_handler, timeout=None):
+        self.host = host
+        self.port = port
         self.conn_handler = conn_handler
         self.connect_error_handler = connect_error_handler
         self._timeout_ev = None
+        self._error_sent = False
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setblocking(0)
-        event.write(sock, self.handle_connect, sock, host, port).add()
+        event.write(sock, self.handle_connect, sock).add()
         # TODO: socket.getaddrinfo(); needs to be non-blocking.
         if timeout:
             to_err = errno.ETIMEDOUT
-            self._timeout_ev = schedule(timeout, self.connect_error_handler, host, port, to_err)
+            self._timeout_ev = schedule(timeout, self.handle_error, to_err)
         try:
             err = sock.connect_ex((host, port)) # FIXME: check for DNS errors, etc.
         except socket.error, why:
             if self._timeout_ev:
                 self._timeout_ev.delete()
-            connect_error_handler(host, port, why)
+            self.handle_error(why)
             return
         if err != errno.EINPROGRESS: # FIXME: others?
             if self._timeout_ev:
                 self._timeout_ev.delete()
-            connect_error_handler(host, port, err)
+            self.handle_error(err)
   
-    def handle_connect(self, sock, host, port):
+    def handle_connect(self, sock):
         if self._timeout_ev:
             self._timeout_ev.delete()
-        tcp_conn = _EventConnection(sock, host, port, self.connect_error_handler)
+        tcp_conn = _EventConnection(sock, self.host, self.port, self.handle_error)
         tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
+
+    def handle_error(self, err=None):
+        if self._timeout_ev:
+            self._timeout_ev.delete()
+        if not self._error_sent:
+            self._error_sent = True
+            if err == None:
+                t, err, tb = sys.exc_info()
+            self.connect_error_handler(self.host, self.port, err)
+
 
 # adapted from Medusa
 class _AsyncoreLoop:
