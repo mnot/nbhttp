@@ -171,7 +171,7 @@ class HttpMessageParser:
                 else: # new chunk
                     try:
                         # they really need to use CRLF
-                        chunk_size, rest = instr.split("\r\n", 1)
+                        chunk_size, rest = instr.split(linesep, 1)
                     except ValueError:
                         # got a CRLF without anything behind it.. wait a bit
                         if len(instr) > 256:
