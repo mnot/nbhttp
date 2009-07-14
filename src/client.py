@@ -254,7 +254,6 @@ class Client(HttpMessageParser):
         if self._input_buffer:
             self._handle_input("")
         if self._input_delimit == CLOSE:
-            self._input_state = WAITING
             self._input_end()
         elif self._input_state == WAITING:
             return # we've seen the whole body already, or nothing has happened yet.
