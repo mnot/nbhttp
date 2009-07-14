@@ -158,12 +158,12 @@ class HttpMessageParser:
                         self._input_body_left -= len(instr)
                 elif self._input_body_left == 0: # done
                     if len(instr) >= 2 and instr[:2] == linesep:
-                        self._input_end()
                         self._input_state = WAITING
+                        self._input_end()
                         self._handle_input(instr[2:])
                     elif hdr_end.search(instr):
-                        self._input_end()
                         self._input_state = WAITING
+                        self._input_end()
                         trailers, rest = hdr_end.split(instr, 1) # TODO: process trailers
                         self._handle_input(rest)
                     else:
