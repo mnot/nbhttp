@@ -10,5 +10,15 @@ setup(name='nbhttp',
       url='http://github.com/mnot/nbhttp/',
       packages=['nbhttp'],
       package_dir={'nbhttp': 'src'},
-      scripts=['scripts/proxy.py']
+      scripts=['scripts/proxy.py'],
+      classifiers=[
+           'Development Status :: 4 - Beta',
+           'Intended Audience :: Developers',
+           'License :: OSI Approved :: MIT License',
+           'Programming Language :: Python',
+           'Topic :: Internet :: WWW/HTTP', 
+           'Topic :: Internet :: Proxy Servers',
+           'Topic :: Internet :: WWW/HTTP :: HTTP Servers',
+           'Topic :: Software Development :: Libraries :: Python Modules',
+      ]
      )
