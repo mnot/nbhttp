@@ -102,6 +102,8 @@ logging.basicConfig()
 log = logging.getLogger('server')
 log.setLevel(logging.WARNING)
 
+# FIXME: assure that the connection isn't closed before reading the entire req body
+# TODO: filter out 100 responses to HTTP/1.0 clients that didn't ask for it.
 
 class Server:
     "An asynchronous HTTP server."
@@ -241,7 +243,14 @@ class HttpServerConnection(HttpMessageParser):
         if self.req_version == 1.1 and 'host' not in [ k.strip().lower() for (k, v) in hdr_tuples]:
             self._handle_error(ERR_HOST_REQ)
             raise ValueError
-
+        if hdr_tuples[:1][:1][:1] in [" ", "\t"]:
+            self._handle_error(ERR_WHITESPACE_HDR)
+        for code in transfer_codes: # we only support 'identity' and chunked' codes
+            if code not in ['identity', 'chunked']: 
+                # FIXME: SHOULD also close connection
+                self._handle_error(ERR_TRANSFER_CODE)
+                raise ValueError
+        # FIXME: MUST 400 request messages with whitespace between name and colon
         self.method = method
         self.connection_hdr = conn_tokens
 

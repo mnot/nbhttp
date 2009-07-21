@@ -48,6 +48,16 @@ ERR_READ_TIMEOUT = {
     'desc': "Read timeout", 
 }
 
+ERR_TRANSFER_CODE = {
+    'desc': "Unknown request transfer coding",
+    'status': ("501", "Not Implemented"),
+}
+
+ERR_WHITESPACE_HDR = {
+    'desc': "Whitespace between request-line and first header",
+    'status': ("400", "Bad Request"),
+}
+
 # client-specific errors
 
 ERR_URL = {

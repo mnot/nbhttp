@@ -238,7 +238,7 @@ class HttpMessageParser:
             # parse connection-related headers
             if f_name == "connection":
                 conn_tokens += [v.strip().lower() for v in f_val.split(',')]
-            elif f_name == "transfer-encoding":
+            elif f_name == "transfer-encoding": # FIXME: parameters
                 transfer_codes += [v.strip().lower() for v in f_val.split(',')]
             elif f_name == "content-length":
                 if content_length != None:
@@ -248,9 +248,11 @@ class HttpMessageParser:
                 except ValueError:
                     continue
 
+        # FIXME: WSP between name and colon; request = 400, response = discard
+        # TODO: remove *and* ignore conn tokens if the message was 1.0 
+
         # ignore content-length if transfer-encoding is present
         if transfer_codes != [] and content_length != None:
-#            hdr_tuples = [(n,v) for (n,v) in hdr_tuples if n.strip().lower() != 'content-length']
             content_length = None 
 
         try:

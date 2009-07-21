@@ -97,6 +97,7 @@ from common import HttpMessageParser, \
 from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ, ERR_READ_TIMEOUT, ERR_HTTP_VERSION
 
 # TODO: proxy support
+# TODO: next-hop version cache for Expect/Continue, etc.
 
 class Client(HttpMessageParser):
     "An asynchronous HTTP client."
@@ -170,6 +171,7 @@ class Client(HttpMessageParser):
         self._req_state = HEADERS_DONE
         _idle_pool.attach(host, port, self._handle_connect, self._handle_connect_error, self.connect_timeout)
         return self.req_body, self.req_done
+    # TODO: if we sent Expect: 100-continue, don't wait forever (i.e., schedule something)
 
     def req_body(self, chunk):
         "Send part of the request body. May be called zero to many times."
@@ -257,7 +259,7 @@ class Client(HttpMessageParser):
             self._input_end()
         elif self._input_state == WAITING:
             return # we've seen the whole body already, or nothing has happened yet.
-        else:
+        else: # TODO: need API control over retries as well.
             if self.method in idempotent_methods and \
               self._retries < self.retry_limit and \
               self._input_state == WAITING: # FIXME: look 5 lines above
