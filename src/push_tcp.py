@@ -469,20 +469,13 @@ class _AsyncoreLoop:
             now = time.time()
             if (now - last_event_check) >= self.granularity:
                 last_event_check = now
-                fired = []
-                i = j = 0
-                while i < len(self.events):
-                    when, what = self.events[i]
+                for event in self.events:
+                    when, what = event
                     if now >= when:
-                        fired.append(what)
-                        j = i + 1
+                        self.events.remove(event)
+                        what()
                     else:
                         break
-                    i = i + 1
-                if fired:
-                    self.events = self.events[j:]
-                    for what in fired:
-                        what()
             # sample the number of channels
             n = len(self.socket_map)
             self.num_channels = n
