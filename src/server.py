@@ -96,13 +96,11 @@ from common import HttpMessageParser, \
     hop_by_hop_hdrs, \
     linesep, dummy
 
-from error import ERR_HTTP_VERSION, ERR_HOST_REQ, ERR_TRANSFER_CODE, \
-    ERR_WHITESPACE_HDR
-from state_enforce import State
+from error import ERR_HTTP_VERSION, ERR_HOST_REQ, ERR_WHITESPACE_HDR, ERR_TRANSFER_CODE
 
 logging.basicConfig()
 log = logging.getLogger('server')
-log.setLevel(logging.DEBUG)
+log.setLevel(logging.WARNING)
 
 # FIXME: assure that the connection isn't closed before reading the entire req body
 # TODO: filter out 100 responses to HTTP/1.0 clients that didn't ask for it.
@@ -124,152 +122,16 @@ class HttpServerConnection(HttpMessageParser):
     def __init__(self, request_handler, tcp_conn):
         HttpMessageParser.__init__(self)
         self.request_handler = request_handler
-        self._tcp_conn = tcp_conn
-        self._res_body_pause_cb = dummy
-        self._queue = []
-
-    def req_body_pause(self, paused):
-        "Indicate that the server should pause (True) or unpause (False) the request."
-        if self._tcp_conn and self._tcp_conn.tcp_connected:
-            print "PAUSE" # FIXME: needs to be connected to the request
-            self._tcp_conn.pause(paused)
-
-    # Methods called by push_tcp
-
-    def _res_body_pause(self, paused):
-        "Pause/unpause sending the response body."
-        self._res_body_pause_cb(paused)
-
-    def _conn_closed(self):
-        "The server connection has closed."
-        # FIXME: any other cleanup necessary?
-        pass
-
-    # Methods called by common.HttpRequestParser
-
-    @State('srv_conn', None, '_input_end')
-    def _input_start(self, top_line, hdr_tuples, conn_tokens, transfer_codes, content_length):
-        """
-        Take the top set of headers from the input stream, parse them
-        and queue the request to be processed by the application.
-        """
-        req = HttpServerRequest(self)
-        req.connection_hdr = conn_tokens
-        req.hdr_tuples = hdr_tuples
-        self._queue.append(req)
-        try: 
-            req.method, _req_line = top_line.split(None, 1)
-            req.uri, req_version = _req_line.rsplit(None, 1)
-            req.req_version = float(req_version.rsplit('/', 1)[1])
-        except (ValueError, IndexError), why:
-            req._handle_error(ERR_HTTP_VERSION, top_line) # FIXME: more fine-grained
-            raise ValueError
-        if req.req_version == 1.1 and 'host' not in [ k.strip().lower() for (k, v) in hdr_tuples]:
-            req._handle_error(ERR_HOST_REQ)
-            raise ValueError
-        if hdr_tuples[:1][:1][:1] in [" ", "\t"]:
-            req._handle_error(ERR_WHITESPACE_HDR)
-            raise ValueError
-        for code in transfer_codes: # we only support 'identity' and chunked' codes
-            if code not in ['identity', 'chunked']: 
-                # FIXME: SHOULD also close connection
-                req._handle_error(ERR_TRANSFER_CODE)
-                raise ValueError
-        # FIXME: MUST 400 request messages with whitespace between name and colon
-        if len(self._queue) == 1:
-            self._queue[0].req_start(self._tcp_conn)
-        else:
-            print "** pipeline queue"
-        allows_body = (content_length) or (transfer_codes != [])
-        print "queue add %s" % req.uri
-        return allows_body
-
-    @State('srv_conn', '_input_start', '_input_body')
-    def _input_body(self, chunk):
-        "Process a request body chunk from the wire."
-        self._queue[-1].req_body(chunk)
-    
-    @State('srv_conn', '_input_start', '_input_body')
-    def _input_end(self):
-        "Indicate that the request is finished."
-        self._queue[-1].req_done(None)
-
-    @State('srv_conn', '_input_start', '_input_body')
-    def _input_error(self, err, detail=None):
-        "Indicate a parsing problem with the request."
-        assert "input error"
-        err['detail'] = detail
-        if self._tcp_conn: # FIXME: flush queue up to error? send to client?
-            self._tcp_conn.close()
-            self._tcp_conn = None
-        self._queue[-1].req_done(err)
-
-    def res_done(self, req):
-        print "conn res done..."
-        finished_req = self._queue.pop(0)
-        assert finished_req is req, "mismatched request %s to %s" % (finished_req.__dict__, req.__dict__)
-        if len(self._queue) > 0:
-            print "starting next req..."
-            self._queue[0].req_start(self._tcp_conn)
-        
-
-
-class HttpServerRequest:
-    def __init__(self, conn):
-        self.request_handler = conn.request_handler
-        self.req_body_pause = conn.req_body_pause
-        self.conn_res_done = conn.res_done
         self.req_body_cb = None
         self.req_done_cb = None
         self.method = None
-        self.uri = None
         self.req_version = None
-        self.hdr_tuples = []
-        self.connection_hdr = []
-        self._tcp_conn = None
-        self._res_state = WAITING
-        self._res_delimit = None
-        self._req_body_buffer = []
-        self._req_done = False
-        self._error = None
-
-    @State('srv_res')
-    def req_start(self, tcp_conn):
-        "Kick off the request."
-        log.info("%s server req_start %s %s %s" % (id(self), self.method, self.uri, self.req_version))
         self._tcp_conn = tcp_conn
-        if not self._error:
-            self.req_body_cb, self.req_done_cb = self.request_handler(
-                self.method, self.uri, self.hdr_tuples, self.res_start, self.req_body_pause)
-            for chunk in self._req_body_buffer:
-                self.req_body_cb(chunk)
-            if self._req_done:
-                self.req_done_cb(self._req_done)
-        else:
-            status_code, status_phrase = self._error.get('status', ('400', 'Bad Request'))
-            hdrs = [
-                ('Content-Type', 'text/plain'),
-            ]
-            body = self._error['desc']
-            if self._error.has_key('detail'):
-                body += " (%s)" % self._error['detail']
-            self.res_start(status_code, status_phrase, hdrs, dummy)
-            self.res_body(body)
-            self.res_done(self._error)
-            
-    def req_body(self, chunk):
-        if callable(self.req_body_cb):
-            self.req_body_cb(chunk)
-        else:
-            self._req_body_buffer.append(chunk)
-        
-    def req_done(self, err=None):
-        if callable(self.req_done_cb):
-            self.req_done_cb(err)
-        else:
-            self._req_done = err
+        self._res_state = WAITING
+        self.connection_hdr = []
+        self._res_delimit = None
+        self._res_body_pause_cb = None
 
-    @State('srv_res', 'req_start', '_handle_error')
     def res_start(self, status_code, status_phrase, res_hdrs, res_body_pause):
         "Start a response. Must only be called once per response."
         log.info("%s server res_start %s %s" % (id(self), status_code, status_phrase))
@@ -305,7 +167,6 @@ class HttpServerRequest:
         self._res_state = HEADERS_DONE
         return self.res_body, self.res_done
 
-    @State('srv_res', 'res_start', 'res_body')
     def res_body(self, chunk):
         "Send part of the response body. May be called zero to many times."
         log.debug("%s server res_body %s " % (id(self), len(chunk)))
@@ -318,18 +179,18 @@ class HttpServerRequest:
         else:
             self._tcp_conn.write("%s" % chunk)
 
-    @State('srv_res', 'res_start', 'res_body')
     def res_done(self, err):
         """
         Signal the end of the response, whether or not there was a body. MUST be
         called exactly once for each response. 
         
         If err is not None, it is an error dictionary (see the error module)
-        indicating that an HTTP-specific (i.e., non-application) error occurred
+        indicating that an HTTP-specific (i.e., non-application) error occured
         in the generation of the response; this is useful for debugging.
         """
         log.debug("%s server res_done" % id(self))
         assert self._res_state == HEADERS_DONE
+        self._res_state = WAITING
         if err:
             self._tcp_conn.close() # FIXME: need to see if it's a recoverable error...
         elif self._res_delimit == NONE:
@@ -342,15 +203,95 @@ class HttpServerRequest:
             pass # TODO: double-check the length
         else:
             raise AssertionError, "Unknown response delimiter"
-        self.conn_res_done(self)
 
-    @State('srv_res', None, 'req_start')
+    def req_body_pause(self, paused):
+        "Indicate that the server should pause (True) or unpause (False) the request."
+        if self._tcp_conn and self._tcp_conn.tcp_connected:
+            self._tcp_conn.pause(paused)
+
+    # Methods called by push_tcp
+
+    def _res_body_pause(self, paused):
+        "Pause/unpause sending the response body."
+        if self._res_body_pause_cb:
+            self._res_body_pause_cb(paused)
+
+    def _conn_closed(self):
+        "The server connection has closed."
+        if self._res_state != WAITING:
+            pass # FIXME: any cleanup necessary?
+#        self.pause()
+#        self._queue = []
+#        self.tcp_conn.handler = None
+#        self.tcp_conn = None                    
+
+    # Methods called by common.HttpRequestParser
+
+    def _input_start(self, top_line, hdr_tuples, conn_tokens, transfer_codes, content_length):
+        """
+        Take the top set of headers from the input stream, parse them
+        and queue the request to be processed by the application.
+        """
+        assert self._input_state == WAITING, "pipelining not supported" # FIXME: pipelining
+        try: 
+            method, _req_line = top_line.split(None, 1)
+            uri, req_version = _req_line.rsplit(None, 1)
+            self.req_version = float(req_version.rsplit('/', 1)[1])
+        except ValueError, why:
+            self._handle_error(ERR_HTTP_VERSION, top_line) # FIXME: more fine-grained
+            raise ValueError
+        if self.req_version == 1.1 and 'host' not in [ k.strip().lower() for (k, v) in hdr_tuples]:
+            self._handle_error(ERR_HOST_REQ)
+            raise ValueError
+        if hdr_tuples[:1][:1][:1] in [" ", "\t"]:
+            self._handle_error(ERR_WHITESPACE_HDR)
+        for code in transfer_codes: # we only support 'identity' and chunked' codes
+            if code not in ['identity', 'chunked']: 
+                # FIXME: SHOULD also close connection
+                self._handle_error(ERR_TRANSFER_CODE)
+                raise ValueError
+        # FIXME: MUST 400 request messages with whitespace between name and colon
+        self.method = method
+        self.connection_hdr = conn_tokens
+
+        log.info("%s server req_start %s %s %s" % (id(self), method, uri, self.req_version))
+        self.req_body_cb, self.req_done_cb = self.request_handler(
+                method, uri, hdr_tuples, self.res_start, self.req_body_pause)
+        allows_body = (content_length) or (transfer_codes != [])
+        return allows_body
+
+    def _input_body(self, chunk):
+        "Process a request body chunk from the wire."
+        self.req_body_cb(chunk)
+    
+    def _input_end(self):
+        "Indicate that the request body is complete."
+        self.req_done_cb(None)
+
+    def _input_error(self, err, detail=None):
+        "Indicate a parsing problem with the request body."
+        err['detail'] = detail
+        if self._tcp_conn:
+            self._tcp_conn.close()
+            self._tcp_conn = None
+        self.req_done_cb(err)
+
     def _handle_error(self, err, detail=None):
         "Handle a problem with the request by generating an appropriate response."
+#        self._queue.append(ErrorHandler(status_code, status_phrase, body, self))
         assert self._res_state == WAITING
         if detail:
             err['detail'] = detail
-        self._error = err
+        status_code, status_phrase = err.get('status', ('400', 'Bad Request'))
+        hdrs = [
+            ('Content-Type', 'text/plain'),
+        ]
+        body = err['desc']
+        if err.has_key('detail'):
+            body += " (%s)" % err['detail']
+        self.res_start(status_code, status_phrase, hdrs, dummy)
+        self.res_body(body)
+        self.res_done()
 
     
 def test_handler(method, uri, hdrs, res_start, req_pause):
