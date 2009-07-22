@@ -200,7 +200,7 @@ class Client(HttpMessageParser):
         while satisfying the request; this is useful for debugging.
         """
         assert self._req_state == HEADERS_DONE
-        self._req_state = WAITING
+#        self._req_state = WAITING # TODO: will need to uncomment to allow pipelining
         if err:
             self.res_body_cb, self.res_done_cb = dummy, dummy
             self._tcp_conn.close()
@@ -236,12 +236,11 @@ class Client(HttpMessageParser):
             self._req_buffer = []
         if self.read_timeout:
             self._timeout_ev = push_tcp.schedule(
-                self.read_timeout, self._handle_error, ERR_READ_TIMEOUT)
+                self.read_timeout, self._handle_error, ERR_READ_TIMEOUT, 'connect')
         return self._handle_input, self._conn_closed, self._req_body_pause
 
     def _handle_connect_error(self, host, port, err):
         "The connection has failed."
-        # FIXME: this may be called multiple times (e.g., timeout then refused)
         import os, types, socket
         if type(err) == types.IntType:
             err = os.strerror(err)
@@ -253,23 +252,32 @@ class Client(HttpMessageParser):
 
     def _conn_closed(self):
         "The server closed the connection."
+        if self.read_timeout:
+            self._timeout_ev.delete()
         if self._input_buffer:
             self._handle_input("")
         if self._input_delimit == CLOSE:
             self._input_end()
-        elif self._input_state == WAITING:
-            return # we've seen the whole body already, or nothing has happened yet.
-        else: # TODO: need API control over retries as well.
-            if self.method in idempotent_methods and \
-              self._retries < self.retry_limit and \
-              self._input_state == WAITING: # FIXME: look 5 lines above
-                self._retries += 1
-                if self._timeout_ev:
-                    self._timeout_ev.delete()
-                _idle_pool.attach(self._tcp_conn.host, self._tcp_conn.port, 
-                    self._handle_connect, self._handle_connect_error, self.connect_timeout)                
+        elif self._req_state == WAITING:
+            # nothing has happened yet. TODO: will get more complex with pipelining.
+            if self._retries < self.retry_limit:
+                self._retry()
             else:
-                self._input_error(ERR_CONNECT, "Server closed the connection.")
+                self._handle_error(ERR_CONNECT, "Server closed the connection.")
+        elif self.method in idempotent_methods and \
+          self._retries < self.retry_limit and \
+          self._input_state == WAITING:
+            self._retry()
+        else:
+            self._input_error(ERR_CONNECT, "Server closed the connection.")
+
+    def _retry(self):
+        "Retry the request."
+        if self._timeout_ev:
+            self._timeout_ev.delete()
+        self._retries += 1
+        _idle_pool.attach(self._tcp_conn.host, self._tcp_conn.port, 
+            self._handle_connect, self._handle_connect_error, self.connect_timeout)
 
     def _req_body_pause(self, paused):
         "The client needs the application to pause/unpause the request body."
@@ -283,7 +291,7 @@ class Client(HttpMessageParser):
         Take the top set of headers from the input stream, parse them
         and queue the request to be processed by the application.
         """
-        if self._timeout_ev:
+        if self.read_timeout:
             self._timeout_ev.delete()
         try: 
             res_version, status_txt = top_line.split(None, 1)
@@ -301,26 +309,26 @@ class Client(HttpMessageParser):
             if (res_version == 1.0 and 'keep-alive' in conn_tokens) or \
                 res_version > 1.0:
                 self._conn_reusable = True
-        self.res_body_cb, self.res_done_cb = self.res_start_cb(
-                        res_version, res_code, res_phrase, hdr_tuples, self.res_body_pause)
         if self.read_timeout:
             self._timeout_ev = push_tcp.schedule(
-                             self.read_timeout, self._input_error, ERR_READ_TIMEOUT)
+                 self.read_timeout, self._input_error, ERR_READ_TIMEOUT, 'start')
+        self.res_body_cb, self.res_done_cb = self.res_start_cb(
+            res_version, res_code, res_phrase, hdr_tuples, self.res_body_pause)
         allows_body = (res_code not in no_body_status) or (self.method == "HEAD")
         return allows_body 
 
     def _input_body(self, chunk):
         "Process a response body chunk from the wire."
-        if self._timeout_ev:
+        if self.read_timeout:
             self._timeout_ev.delete()
         self.res_body_cb(chunk)
         if self.read_timeout:
             self._timeout_ev = push_tcp.schedule(
-                             self.read_timeout, self._input_error, ERR_READ_TIMEOUT)
-        
+                 self.read_timeout, self._input_error, ERR_READ_TIMEOUT, 'body')
+
     def _input_end(self):
         "Indicate that the response body is complete."
-        if self._timeout_ev:
+        if self.read_timeout:
             self._timeout_ev.delete()
         if self._tcp_conn:
             if self._tcp_conn.tcp_connected and self._conn_reusable:
@@ -334,7 +342,7 @@ class Client(HttpMessageParser):
 
     def _input_error(self, err, detail=None):
         "Indicate a parsing problem with the response body."
-        if self._timeout_ev:
+        if self.read_timeout:
             self._timeout_ev.delete()
         if self._tcp_conn:
             self._tcp_conn.close()
