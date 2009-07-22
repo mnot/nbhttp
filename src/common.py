@@ -141,6 +141,7 @@ class HttpMessageParser:
                 else:
                     self._input_end()
                 self._input_state = WAITING
+#               self._handle_input(instr)
             elif self._input_delimit == CLOSE:
                 self._input_body(instr)
             elif self._input_delimit == CHUNKED:
@@ -264,18 +265,17 @@ class HttpMessageParser:
         self._input_state = HEADERS_DONE
         if not allows_body:
             self._input_delimit = NONE
-        else:
-            if len(transfer_codes) > 0:
-                if 'chunked' in transfer_codes:
-                    self._input_delimit = CHUNKED
-                    self._input_body_left = -1 # flag that we don't know
-                else:
-                    self._input_delimit = CLOSE
-            elif content_length != None:
-                self._input_delimit = COUNTED
-                self._input_body_left = content_length
-            else: 
+        elif len(transfer_codes) > 0:
+            if 'chunked' in transfer_codes:
+                self._input_delimit = CHUNKED
+                self._input_body_left = -1 # flag that we don't know
+            else:
                 self._input_delimit = CLOSE
+        elif content_length != None:
+            self._input_delimit = COUNTED
+            self._input_body_left = content_length
+        else: 
+            self._input_delimit = CLOSE
         return rest
     
     
