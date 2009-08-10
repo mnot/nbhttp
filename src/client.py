@@ -267,6 +267,8 @@ class Client(HttpMessageParser):
           self._retries < self.retry_limit and \
           self._input_state == WAITING:
             self._retry()
+        elif self._input_state == WAITING: # haven't completed headers yet
+            self._handle_error(ERR_CONNECT, "Server closed the connection.")
         else:
             self._input_error(ERR_CONNECT, "Server closed the connection.")
 
