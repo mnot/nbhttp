@@ -131,9 +131,6 @@ class HttpServerConnection(HttpMessageParser, HttpMessageSerialiser):
         self.connection_hdr = []
         self._res_body_pause_cb = None
 
-    def output(self, chunk):
-        self._tcp_conn.write(chunk)
-
     def res_start(self, status_code, status_phrase, res_hdrs, res_body_pause):
         "Start a response. Must only be called once per response."
         self._res_body_pause_cb = res_body_pause
@@ -164,8 +161,8 @@ class HttpServerConnection(HttpMessageParser, HttpMessageSerialiser):
     def res_done(self, err):
         """
         Signal the end of the response, whether or not there was a body. MUST be
-        called exactly once for each response. 
-        
+        called exactly once for each response.
+
         If err is not None, it is an error dictionary (see the error module)
         indicating that an HTTP-specific (i.e., non-application) error occured
         in the generation of the response; this is useful for debugging.
@@ -191,9 +188,12 @@ class HttpServerConnection(HttpMessageParser, HttpMessageSerialiser):
 #        self.pause()
 #        self._queue = []
 #        self.tcp_conn.handler = None
-#        self.tcp_conn = None                    
+#        self.tcp_conn = None
 
     # Methods called by common.HttpRequestParser
+
+    def output(self, chunk):
+        self._tcp_conn.write(chunk)
 
     def _input_start(self, top_line, hdr_tuples, conn_tokens, transfer_codes, content_length):
         """
