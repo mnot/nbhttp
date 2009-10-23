@@ -88,7 +88,7 @@ THE SOFTWARE.
 from urlparse import urlsplit, urlunsplit
 
 import push_tcp
-from common import HttpMessageParser, \
+from common import HttpMessageParser, HttpMessageSerialiser, \
     CLOSE, COUNTED, CHUNKED, NONE, \
     WAITING, HEADERS_DONE, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
@@ -98,7 +98,7 @@ from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ, ERR_READ_TIMEOUT, ERR_HTTP_
 # TODO: proxy support
 # TODO: next-hop version cache for Expect/Continue, etc.
 
-class Client(HttpMessageParser):
+class Client(HttpMessageParser, HttpMessageSerialiser):
     "An asynchronous HTTP client."
     connect_timeout = None
     read_timeout = None
@@ -106,6 +106,7 @@ class Client(HttpMessageParser):
 
     def __init__(self, res_start_cb):
         HttpMessageParser.__init__(self)
+        HttpMessageSerialiser.__init__(self)
         self.res_start_cb = res_start_cb
         self.res_body_cb = None
         self.res_done_cb = None
@@ -114,14 +115,16 @@ class Client(HttpMessageParser):
         self.req_hdrs = []
         self._tcp_conn = None
         self._conn_reusable = False
-        self._req_state = WAITING
-        self._req_delimit = None
-        self._req_content_length = None
-        self._req_buffer = []
         self._req_body_pause_cb = None
-        self._req_body_sent = 0
         self._retries = 0
         self._timeout_ev = None
+        self._output_buffer = []
+
+    def output(self, chunk):
+        self._output_buffer.append(chunk)
+        if self._tcp_conn and self._tcp_conn.tcp_connected:
+            self._tcp_conn.write("".join(self._output_buffer))
+            self._output_buffer = []
         
     def req_start(self, method, uri, req_hdrs, req_body_pause):
         """
@@ -131,8 +134,10 @@ class Client(HttpMessageParser):
         
         Returns a (req_body, req_done) tuple.
         """
-        assert self._req_state == WAITING
         self._req_body_pause_cb = req_body_pause
+        req_hdrs = [i for i in req_hdrs \
+            if not i[0].lower() in hop_by_hop_hdrs ]
+
         (scheme, authority, path, query, fragment) = urlsplit(uri)
         if scheme.lower() != 'http':
             self._handle_error(ERR_URL, "Only HTTP URLs are supported")
@@ -148,46 +153,25 @@ class Client(HttpMessageParser):
             host, port = authority, 80
         if path == "":
             path = "/"
-        # clean req headers
-        req_hdrs = [i for i in req_hdrs \
-                    if not i[0].lower() in ['host'] + hop_by_hop_hdrs ]
-        self._req_delimit = NONE # default
-        try:
-            self._req_content_length = int([i[1] for i in req_hdrs \
-                                    if i[0].lower() == 'content-length'].pop(0))
-            self._req_delimit = COUNTED
-        except IndexError:
-            self._req_content_length = None
-        transfer_codings = get_hdr(req_hdrs, 'transfer-encoding')
-        if transfer_codings:
-            self._req_delimit = CHUNKED
-            if self._req_content_length:
-                self._req_content_length = None     
-        req_hdrs.append(("Host", authority))
-        req_hdrs.append(("Connection", "keep-alive"))
         uri = urlunsplit(('', '', path, query, ''))
         self.method, self.uri, self.req_hdrs = method, uri, req_hdrs
-        self._req_state = HEADERS_DONE
+        self.req_hdrs.append(("Host", host)) # FIXME: port
+        self.req_hdrs.append(("Connection", "keep-alive"))
+        try:
+            body_len = int(get_hdr(req_hdrs, "content-length").pop(0))
+            delimit=COUNTED
+        except IndexError, ValueError:
+            body_len = None
+            delimit=NONE
+        self._output_start("%s %s HTTP/1.1" % (self.method, self.uri), self.req_hdrs, delimit)
         _idle_pool.attach(host, port, self._handle_connect, self._handle_connect_error, self.connect_timeout)
         return self.req_body, self.req_done
     # TODO: if we sent Expect: 100-continue, don't wait forever (i.e., schedule something)
 
     def req_body(self, chunk):
         "Send part of the request body. May be called zero to many times."
-        assert self._req_state == HEADERS_DONE
-        if not chunk: 
-            return
-        if self._req_delimit == CHUNKED:
-            self._req_buffer.append("%s\r\n%s\r\n" % (hex(len(chunk))[2:], chunk)) 
-        elif self._req_delimit == COUNTED:
-            self._req_buffer.append(chunk)
-        else:
-            self._handle_error(ERR_LEN_REQ)
-        if self._tcp_conn and self._tcp_conn.tcp_connected:
-            self._tcp_conn.write("".join(self._req_buffer))
-        self._req_body_sent += len(chunk)
-        assert self._req_body_sent <= self._req_content_length, \
-            "Too many request body bytes sent"
+        # FIXME: self._handle_error(ERR_LEN_REQ)
+        self._output_body(chunk)
         
     def req_done(self, err):
         """
@@ -198,22 +182,7 @@ class Client(HttpMessageParser):
         indicating that an HTTP-specific (i.e., non-application) error occurred
         while satisfying the request; this is useful for debugging.
         """
-        assert self._req_state == HEADERS_DONE
-#        self._req_state = WAITING # TODO: will need to uncomment to allow pipelining
-        if err:
-            self.res_body_cb, self.res_done_cb = dummy, dummy
-            self._tcp_conn.close()
-            self._tcp_conn = None
-        elif self._req_delimit == NONE:
-            pass # request didn't have a body at all.
-        elif self._req_delimit == CHUNKED:
-            # FIXME: need to write to the buffer, not the conn
-            self._tcp_conn.write("0\r\n\r\n") # We don't support trailers
-        elif self._req_delimit == COUNTED:
-            pass # TODO: double-check the length
-        else:
-            raise AssertionError, "Unknown request delimiter"
-            
+        self._output_end(err)            
 
     def res_body_pause(self, paused):
         "Temporarily stop / restart sending the response body."
@@ -225,14 +194,7 @@ class Client(HttpMessageParser):
     def _handle_connect(self, tcp_conn):
         "The connection has succeeded."
         self._tcp_conn = tcp_conn
-        hdr_block = ["%s %s HTTP/1.1" % (self.method, self.uri)]
-        hdr_block += ["%s: %s" % (k, v) for k, v in self.req_hdrs]
-        hdr_block.append("")
-        hdr_block.append("")
-        self._tcp_conn.write(linesep.join(hdr_block))
-        if self._req_buffer: # TODO: combine into single write
-            self._tcp_conn.write("".join(self._req_buffer))
-            self._req_buffer = []
+        self.output("") # kick the output buffer
         if self.read_timeout:
             self._timeout_ev = push_tcp.schedule(
                 self.read_timeout, self._handle_error, ERR_READ_TIMEOUT, 'connect')
@@ -257,7 +219,7 @@ class Client(HttpMessageParser):
             self._handle_input("")
         if self._input_delimit == CLOSE:
             self._input_end()
-        elif self._req_state == WAITING:
+        elif self._output_state == WAITING:
             # nothing has happened yet. TODO: will get more complex with pipelining.
             if self._retries < self.retry_limit:
                 self._retry()

@@ -85,6 +85,61 @@ def get_hdr(hdr_tuples, name):
                 ]
             , [])]
 
+class HttpMessageSerialiser:
+    """
+    This is a base class for something that has to serialise HTTP messages,
+    request or response.
+    """
+    def __init__(self):
+        self._output_state = WAITING
+        self._output_delimit = None
+        self._output_pause_cb = None
+
+    def output(self, out):
+        raise NotImplementedError
+
+    def _handle_error(err):
+        raise NotImplementedError
+
+    def _output_start(self, top_line, hdr_tuples, delimit):
+        self._output_delimit = delimit
+        out = linesep.join(
+                [top_line] +
+                ["%s: %s" % (k, v) for k, v in hdr_tuples] +
+                ["", ""]
+        )
+        self.output(out)
+        self._output_state = HEADERS_DONE
+        
+    def _output_body(self, chunk):
+        if not chunk: 
+            return
+        if self._output_delimit == CHUNKED:
+            chunk = "%s\r\n%s\r\n" % (hex(len(chunk))[2:], chunk)
+        self.output(chunk)
+        #FIXME: body counting
+#        self._output_body_sent += len(chunk)
+#        assert self._output_body_sent <= self._output_content_length, \
+#            "Too many body bytes sent"
+
+    def _output_end(self, err):
+        if err:
+            self.output_body_cb, self.output_done_cb = dummy, dummy
+            self._tcp_conn.close()
+            self._tcp_conn = None
+        elif self._output_delimit == NONE:
+            pass # didn't have a body at all.
+        elif self._output_delimit == CHUNKED:
+            self.output("0\r\n\r\n")
+        elif self._output_delimit == COUNTED:
+            pass # TODO: double-check the length
+        elif self._output_delimit == CLOSE:
+            self._tcp_conn.close() # FIXME: abstract out?
+        else:
+            raise AssertionError, "Unknown request delimiter %s" % self._output_delimit
+
+
+
 class HttpMessageParser:
     """
     This is a base class for something that has to parse HTTP messages, request
@@ -227,7 +282,7 @@ class HttpMessageParser:
         conn_tokens = []
         transfer_codes = []
         content_length = None
-        for line in hdr_lines: # TODO: header folding
+        for line in hdr_lines:
             try:
                 fn, fv = line.split(":", 1)
                 hdr_tuples.append((fn, fv))
@@ -277,5 +332,4 @@ class HttpMessageParser:
         else: 
             self._input_delimit = CLOSE
         return rest
-    
     

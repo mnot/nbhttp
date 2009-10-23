@@ -90,11 +90,11 @@ import sys
 import logging
 
 import push_tcp
-from common import HttpMessageParser, \
+from common import HttpMessageParser, HttpMessageSerialiser, \
     CLOSE, COUNTED, CHUNKED, NONE, \
     WAITING, HEADERS_DONE, \
     hop_by_hop_hdrs, \
-    linesep, dummy
+    linesep, dummy, get_hdr
 
 from error import ERR_HTTP_VERSION, ERR_HOST_REQ, ERR_WHITESPACE_HDR, ERR_TRANSFER_CODE
 
@@ -117,67 +117,49 @@ class Server:
         return conn._handle_input, conn._conn_closed, conn._res_body_pause
 
 
-class HttpServerConnection(HttpMessageParser):
+class HttpServerConnection(HttpMessageParser, HttpMessageSerialiser):
     "A handler for an HTTP server connection."
     def __init__(self, request_handler, tcp_conn):
         HttpMessageParser.__init__(self)
+        HttpMessageSerialiser.__init__(self)
         self.request_handler = request_handler
+        self._tcp_conn = tcp_conn
         self.req_body_cb = None
         self.req_done_cb = None
         self.method = None
         self.req_version = None
-        self._tcp_conn = tcp_conn
-        self._res_state = WAITING
         self.connection_hdr = []
-        self._res_delimit = None
         self._res_body_pause_cb = None
+
+    def output(self, chunk):
+        self._tcp_conn.write(chunk)
 
     def res_start(self, status_code, status_phrase, res_hdrs, res_body_pause):
         "Start a response. Must only be called once per response."
-        log.info("%s server res_start %s %s" % (id(self), status_code, status_phrase))
-        assert self._res_state == WAITING, self._res_state
         self._res_body_pause_cb = res_body_pause
-        res_top = ["HTTP/1.1 %s %s" % (status_code, status_phrase)]
-        res_len = None
-        for name, value in res_hdrs:
-            norm_name = name.strip().lower()
-            if norm_name == "content-length":
-                try:
-                    res_len = int(value)
-                except ValueError:
-                    raise
-            if norm_name in hop_by_hop_hdrs:
-                continue
-            res_top.append("%s: %s" % (name, value))
-        if "close" in self.connection_hdr:
-            self._res_delimit = CLOSE
-            res_top.append("Connection: close, asked_for")
-        elif res_len is not None:
-            self._res_delimit = COUNTED
-            res_top.append("Content-Length: %s" % str(res_len))
-            res_top.append("Connection: keep-alive")
+        res_hdrs = [i for i in res_hdrs \
+                    if not i[0].lower() in hop_by_hop_hdrs ]
+
+        try:
+            body_len = int(get_hdr(res_hdrs, "content-length").pop(0))
+        except IndexError, ValueError:
+            body_len = None
+        if body_len is not None:
+            delimit = COUNTED
+            res_hdrs.append(("Connection", "keep-alive"))
         elif 2.0 > self.req_version >= 1.1:
-            self._res_delimit = CHUNKED
-            res_top.append("Transfer-Encoding: chunked")
+            delimit = CHUNKED
+            res_hdrs.append(("Transfer-Encoding", "chunked"))
         else:
-            self._res_delimit = CLOSE
-            res_top.append("Connection: close")
-        res_top.append(linesep)
-        self._tcp_conn.write(linesep.join(res_top))
-        self._res_state = HEADERS_DONE
+            delimit = CLOSE
+            res_hdrs.append(("Connection", "close"))
+
+        self._output_start("HTTP/1.1 %s %s" % (status_code, status_phrase), res_hdrs, delimit)
         return self.res_body, self.res_done
 
     def res_body(self, chunk):
         "Send part of the response body. May be called zero to many times."
-        log.debug("%s server res_body %s " % (id(self), len(chunk)))
-        assert self._res_state == HEADERS_DONE
-        if not chunk: 
-            return
-        # TODO: if we sent C-L and we've written more than that many bytes, blow up.
-        if self._res_delimit == CHUNKED:
-            self._tcp_conn.write("%s\r\n%s\r\n" % (hex(len(chunk))[2:], chunk)) # FIXME: why 2:?
-        else:
-            self._tcp_conn.write("%s" % chunk)
+        self._output_body(chunk)
 
     def res_done(self, err):
         """
@@ -188,21 +170,7 @@ class HttpServerConnection(HttpMessageParser):
         indicating that an HTTP-specific (i.e., non-application) error occured
         in the generation of the response; this is useful for debugging.
         """
-        log.debug("%s server res_done" % id(self))
-        assert self._res_state == HEADERS_DONE
-        self._res_state = WAITING
-        if err:
-            self._tcp_conn.close() # FIXME: need to see if it's a recoverable error...
-        elif self._res_delimit == NONE:
-            pass
-        elif self._res_delimit == CHUNKED:
-            self._tcp_conn.write("0\r\n\r\n") # We don't support trailers
-        elif self._res_delimit == CLOSE:
-            self._tcp_conn.close()
-        elif self._res_delimit == COUNTED:
-            pass # TODO: double-check the length
-        else:
-            raise AssertionError, "Unknown response delimiter"
+        self._output_end(err)
 
     def req_body_pause(self, paused):
         "Indicate that the server should pause (True) or unpause (False) the request."
@@ -218,7 +186,7 @@ class HttpServerConnection(HttpMessageParser):
 
     def _conn_closed(self):
         "The server connection has closed."
-        if self._res_state != WAITING:
+        if self._output_state != WAITING:
             pass # FIXME: any cleanup necessary?
 #        self.pause()
 #        self._queue = []
@@ -279,7 +247,7 @@ class HttpServerConnection(HttpMessageParser):
     def _handle_error(self, err, detail=None):
         "Handle a problem with the request by generating an appropriate response."
 #        self._queue.append(ErrorHandler(status_code, status_phrase, body, self))
-        assert self._res_state == WAITING
+        assert self._output_state == WAITING
         if detail:
             err['detail'] = detail
         status_code, status_phrase = err.get('status', ('400', 'Bad Request'))
@@ -308,6 +276,6 @@ def test_handler(method, uri, hdrs, res_start, req_pause):
     
 if __name__ == "__main__":
     sys.stderr.write("PID: %s\n" % os.getpid())
-    h, p = sys.argv[1], int(sys.argv[2])
+    h, p = '127.0.0.1', int(sys.argv[1])
     server = Server(h, p, test_handler)
     push_tcp.run()
