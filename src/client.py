@@ -89,7 +89,7 @@ from urlparse import urlsplit, urlunsplit
 
 import push_tcp
 from common import HttpMessageParser, HttpMessageSerialiser, \
-    CLOSE, COUNTED, CHUNKED, NONE, \
+    CLOSE, COUNTED, NOBODY, \
     WAITING, HEADERS_DONE, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
     linesep, dummy, get_hdr
@@ -98,15 +98,14 @@ from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ, ERR_READ_TIMEOUT, ERR_HTTP_
 # TODO: proxy support
 # TODO: next-hop version cache for Expect/Continue, etc.
 
-class Client(HttpMessageParser, HttpMessageSerialiser):
+class Client(HttpMessageHandler):
     "An asynchronous HTTP client."
     connect_timeout = None
     read_timeout = None
     retry_limit = 2
 
     def __init__(self, res_start_cb):
-        HttpMessageParser.__init__(self)
-        HttpMessageSerialiser.__init__(self)
+        HttpMessageHandler.__init__(self)
         self.res_start_cb = res_start_cb
         self.res_body_cb = None
         self.res_done_cb = None
@@ -120,12 +119,6 @@ class Client(HttpMessageParser, HttpMessageSerialiser):
         self._timeout_ev = None
         self._output_buffer = []
 
-    def output(self, chunk):
-        self._output_buffer.append(chunk)
-        if self._tcp_conn and self._tcp_conn.tcp_connected:
-            self._tcp_conn.write("".join(self._output_buffer))
-            self._output_buffer = []
-        
     def req_start(self, method, uri, req_hdrs, req_body_pause):
         """
         Start a request to uri using method, where 
@@ -159,10 +152,10 @@ class Client(HttpMessageParser, HttpMessageSerialiser):
         self.req_hdrs.append(("Connection", "keep-alive"))
         try:
             body_len = int(get_hdr(req_hdrs, "content-length").pop(0))
-            delimit=COUNTED
+            delimit = COUNTED
         except IndexError, ValueError:
             body_len = None
-            delimit=NONE
+            delimit = NOBODY
         self._output_start("%s %s HTTP/1.1" % (self.method, self.uri), self.req_hdrs, delimit)
         _idle_pool.attach(host, port, self._handle_connect, self._handle_connect_error, self.connect_timeout)
         return self.req_body, self.req_done
@@ -247,7 +240,7 @@ class Client(HttpMessageParser, HttpMessageSerialiser):
         if self._req_body_pause_cb:
             self._req_body_pause_cb(paused)
 
-    # Methods called by common.HttpRequestParser
+    # Methods called by common.HttpMessageHandler
 
     def _input_start(self, top_line, hdr_tuples, conn_tokens, transfer_codes, content_length):
         """
@@ -312,6 +305,12 @@ class Client(HttpMessageParser, HttpMessageSerialiser):
             self._tcp_conn = None
         err['detail'] = detail
         self.res_done_cb(err)
+
+    def _output(self, chunk):
+        self._output_buffer.append(chunk)
+        if self._tcp_conn and self._tcp_conn.tcp_connected:
+            self._tcp_conn.write("".join(self._output_buffer))
+            self._output_buffer = []
 
     # misc
 

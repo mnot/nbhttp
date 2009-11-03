@@ -91,7 +91,7 @@ import logging
 
 import push_tcp
 from common import HttpMessageParser, HttpMessageSerialiser, \
-    CLOSE, COUNTED, CHUNKED, NONE, \
+    CLOSE, COUNTED, CHUNKED, \
     WAITING, HEADERS_DONE, \
     hop_by_hop_hdrs, \
     linesep, dummy, get_hdr
@@ -117,10 +117,10 @@ class Server:
         return conn._handle_input, conn._conn_closed, conn._res_body_pause
 
 
-class HttpServerConnection(HttpMessageParser, HttpMessageSerialiser):
+class HttpServerConnection(HttpMessageHandler):
     "A handler for an HTTP server connection."
     def __init__(self, request_handler, tcp_conn):
-        HttpMessageParser.__init__(self)
+        HttpMessageHandler.__init__(self)
         HttpMessageSerialiser.__init__(self)
         self.request_handler = request_handler
         self._tcp_conn = tcp_conn
@@ -190,7 +190,7 @@ class HttpServerConnection(HttpMessageParser, HttpMessageSerialiser):
 #        self.tcp_conn.handler = None
 #        self.tcp_conn = None
 
-    # Methods called by common.HttpRequestParser
+    # Methods called by common.HttpRequestHandler
 
     def output(self, chunk):
         self._tcp_conn.write(chunk)
