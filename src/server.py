@@ -90,7 +90,7 @@ import sys
 import logging
 
 import push_tcp
-from common import HttpMessageParser, HttpMessageSerialiser, \
+from common import HttpMessageHandler, \
     CLOSE, COUNTED, CHUNKED, \
     WAITING, HEADERS_DONE, \
     hop_by_hop_hdrs, \
@@ -121,7 +121,6 @@ class HttpServerConnection(HttpMessageHandler):
     "A handler for an HTTP server connection."
     def __init__(self, request_handler, tcp_conn):
         HttpMessageHandler.__init__(self)
-        HttpMessageSerialiser.__init__(self)
         self.request_handler = request_handler
         self._tcp_conn = tcp_conn
         self.req_body_cb = None
@@ -192,7 +191,7 @@ class HttpServerConnection(HttpMessageHandler):
 
     # Methods called by common.HttpRequestHandler
 
-    def output(self, chunk):
+    def _output(self, chunk):
         self._tcp_conn.write(chunk)
 
     def _input_start(self, top_line, hdr_tuples, conn_tokens, transfer_codes, content_length):

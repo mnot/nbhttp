@@ -88,7 +88,7 @@ THE SOFTWARE.
 from urlparse import urlsplit, urlunsplit
 
 import push_tcp
-from common import HttpMessageParser, HttpMessageSerialiser, \
+from common import HttpMessageHandler, \
     CLOSE, COUNTED, NOBODY, \
     WAITING, HEADERS_DONE, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
@@ -187,7 +187,7 @@ class Client(HttpMessageHandler):
     def _handle_connect(self, tcp_conn):
         "The connection has succeeded."
         self._tcp_conn = tcp_conn
-        self.output("") # kick the output buffer
+        self._output("") # kick the output buffer
         if self.read_timeout:
             self._timeout_ev = push_tcp.schedule(
                 self.read_timeout, self._handle_error, ERR_READ_TIMEOUT, 'connect')
