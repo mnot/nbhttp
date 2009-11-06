@@ -94,7 +94,7 @@ from common import HttpMessageHandler, \
     CLOSE, COUNTED, CHUNKED, \
     WAITING, HEADERS_DONE, \
     hop_by_hop_hdrs, \
-    linesep, dummy, get_hdr
+    dummy, get_hdr
 
 from error import ERR_HTTP_VERSION, ERR_HOST_REQ, ERR_WHITESPACE_HDR, ERR_TRANSFER_CODE
 
