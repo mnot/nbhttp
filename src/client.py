@@ -95,6 +95,8 @@ from common import HttpMessageHandler, \
     linesep, dummy, get_hdr
 from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ, ERR_READ_TIMEOUT, ERR_HTTP_VERSION
 
+req_remove_hdrs = hop_by_hop_hdrs + ['host']
+
 # TODO: proxy support
 # TODO: next-hop version cache for Expect/Continue, etc.
 
@@ -129,8 +131,7 @@ class Client(HttpMessageHandler):
         """
         self._req_body_pause_cb = req_body_pause
         req_hdrs = [i for i in req_hdrs \
-            if not i[0].lower() in hop_by_hop_hdrs ]
-
+            if not i[0].lower() in req_remove_hdrs]
         (scheme, authority, path, query, fragment) = urlsplit(uri)
         if scheme.lower() != 'http':
             self._handle_error(ERR_URL, "Only HTTP URLs are supported")
