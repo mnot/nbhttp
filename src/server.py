@@ -138,7 +138,7 @@ class HttpServerConnection(HttpMessageHandler):
 
         try:
             body_len = int(get_hdr(res_hdrs, "content-length").pop(0))
-        except IndexError, ValueError:
+        except (IndexError, ValueError):
             body_len = None
         if body_len is not None:
             delimit = COUNTED
