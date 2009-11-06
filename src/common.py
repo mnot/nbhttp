@@ -292,7 +292,7 @@ class HttpMessageHandler:
     def _output(self, out):
         raise NotImplementedError
 
-    def _handle_error(err):
+    def _handle_error(self, err):
         raise NotImplementedError
 
     def _output_start(self, top_line, hdr_tuples, delimit):
