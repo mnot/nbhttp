@@ -198,9 +198,9 @@ class _TcpConnection(asyncore.dispatcher):
             self.conn_closed()
         else:
             self.read_cb(data)
-        if event:
-            if self.read_cb and self.tcp_connected and not self._paused:
-                return self._revent
+            if event:
+                if self.read_cb and self.tcp_connected and not self._paused:
+                    return self._revent
         
     def handle_write(self):
         "The connection is ready for writing; write any buffered data."
@@ -246,7 +246,7 @@ class _TcpConnection(asyncore.dispatcher):
             # uncomfortable race condition here, so we try again.
             # not great, but ok for now. 
             schedule(1, self.conn_closed)
-    handle_close = conn_closed
+    handle_close = conn_closed # for asyncore
 
     def write(self, data):
         "Write data to the connection."
@@ -327,7 +327,7 @@ class create_server(asyncore.dispatcher):
         tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
 
     def handle_error(self):
-        raise AssertionError, "this kind of error should never happen for a server."
+        raise AssertionError, "this should never happen for a server."
 
 
 class create_client(asyncore.dispatcher):
@@ -348,8 +348,6 @@ class create_client(asyncore.dispatcher):
             try:
                 err = sock.connect_ex((host, port)) # FIXME: check for DNS errors, etc.
             except socket.error, why:
-                if self._timeout_ev:
-                    self._timeout_ev.delete()
                 self.handle_error(why)
                 return
             if err != errno.EINPROGRESS: # FIXME: others?
