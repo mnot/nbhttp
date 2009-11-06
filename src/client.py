@@ -92,7 +92,7 @@ from common import HttpMessageHandler, \
     CLOSE, COUNTED, NOBODY, \
     WAITING, HEADERS_DONE, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
-    linesep, dummy, get_hdr
+    dummy, get_hdr
 from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ, ERR_READ_TIMEOUT, ERR_HTTP_VERSION
 
 req_remove_hdrs = hop_by_hop_hdrs + ['host']
