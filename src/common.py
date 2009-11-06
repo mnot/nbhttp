@@ -46,7 +46,7 @@ safe_methods = ['GET', 'HEAD', 'OPTIONS', 'TRACE']
 no_body_status = ['100', '101', '204', '304']
 hop_by_hop_hdrs = ['connection', 'keep-alive', 'proxy-authenticate', 
                    'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 
-                   'upgrade']
+                   'upgrade', 'proxy-connection']
 
 
 from error import ERR_EXTRA_DATA, ERR_CHUNK, ERR_BODY_FORBIDDEN
@@ -300,6 +300,7 @@ class HttpMessageHandler:
         Start ouputting a HTTP message.
         """
         self._output_delimit = delimit
+        # TODO: strip whitespace?
         out = linesep.join(
                 [top_line] +
                 ["%s: %s" % (k, v) for k, v in hdr_tuples] +
