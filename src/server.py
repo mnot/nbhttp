@@ -207,7 +207,7 @@ class HttpServerConnection(HttpMessageHandler):
         except ValueError:
             self._handle_error(ERR_HTTP_VERSION, top_line) # FIXME: more fine-grained
             raise ValueError
-        if self.req_version == 1.1 and 'host' not in [ t[0].lower() for t in hdr_tuples]:
+        if self.req_version == 1.1 and 'host' not in [t[0].lower() for t in hdr_tuples]:
             self._handle_error(ERR_HOST_REQ)
             raise ValueError
         if hdr_tuples[:1][:1][:1] in [" ", "\t"]:
