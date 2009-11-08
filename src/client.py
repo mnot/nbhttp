@@ -136,6 +136,8 @@ class Client(HttpMessageHandler):
         if scheme.lower() != 'http':
             self._handle_error(ERR_URL, "Only HTTP URLs are supported")
             return dummy, dummy
+        if "@" in authority:
+            userinfo, authority = authority.split("@", 1)
         if ":" in authority:
             host, port = authority.rsplit(":", 1)
             try:
