@@ -154,7 +154,7 @@ class Client(HttpMessageHandler):
         try:
             body_len = int(get_hdr(req_hdrs, "content-length").pop(0))
             delimit = COUNTED
-        except IndexError, ValueError:
+        except (IndexError, ValueError):
             body_len = None
             delimit = NOBODY
         self._output_start("%s %s HTTP/1.1" % (self.method, self.uri), self.req_hdrs, delimit)
