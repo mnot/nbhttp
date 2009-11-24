@@ -90,74 +90,60 @@ import sys
 import logging
 
 import push_tcp
-from http_common import HttpMessageHandler, \
-    CLOSE, COUNTED, CHUNKED, \
-    WAITING, HEADERS_DONE, \
-    hop_by_hop_hdrs, \
-    dummy, get_hdr
-
-from error import ERR_HTTP_VERSION, ERR_HOST_REQ, ERR_WHITESPACE_HDR, ERR_TRANSFER_CODE
+from spdy_common import SpdyMessageHandler, CTL_SYN_REPLY, FLAG_NONE, FLAG_FIN
+from http_common import get_hdr, dummy
 
 logging.basicConfig()
 log = logging.getLogger('server')
-log.setLevel(logging.WARNING)
+log.setLevel(logging.DEBUG)
 
 # FIXME: assure that the connection isn't closed before reading the entire req body
 # TODO: filter out 100 responses to HTTP/1.0 clients that didn't ask for it.
 
-class Server:
-    "An asynchronous HTTP server."
+class SpdyServer:
+    "An asynchronous SPDY server."
     def __init__(self, host, port, request_handler):
         self.request_handler = request_handler
         self.server = push_tcp.create_server(host, port, self.handle_connection)
         
     def handle_connection(self, tcp_conn):
         "Process a new push_tcp connection, tcp_conn."
-        conn = HttpServerConnection(self.request_handler, tcp_conn)
+        conn = SpdyServerConnection(self.request_handler, tcp_conn)
         return conn._handle_input, conn._conn_closed, conn._res_body_pause
 
 
-class HttpServerConnection(HttpMessageHandler):
-    "A handler for an HTTP server connection."
+class SpdyServerConnection(SpdyMessageHandler):
+    "A handler for a SPDY server connection."
     def __init__(self, request_handler, tcp_conn):
-        HttpMessageHandler.__init__(self)
+        SpdyMessageHandler.__init__(self)
         self.request_handler = request_handler
         self._tcp_conn = tcp_conn
-        self.req_body_cb = None
-        self.req_done_cb = None
-        self.method = None
-        self.req_version = None
-        self.connection_hdr = []
-        self._res_body_pause_cb = None
+        self._streams = {}
+        self._res_body_pause_cb = False
+        self._debug = log.debug
+        self._debug("new connection %s" % id(self))
 
-    def res_start(self, status_code, status_phrase, res_hdrs, res_body_pause):
+    def res_start(self, stream_id, status_code, status_phrase, res_hdrs, res_body_pause):
         "Start a response. Must only be called once per response."
+        log.debug("res_start %s" % stream_id)
         self._res_body_pause_cb = res_body_pause
-        res_hdrs = [i for i in res_hdrs \
-                    if not i[0].lower() in hop_by_hop_hdrs ]
+        res_hdrs.append(('status', "%s %s" % (status_code, status_phrase)))
+        # TODO: hop-by-hop headers?
+        self._output(self._ser_syn_frame(CTL_SYN_REPLY, FLAG_NONE, stream_id, res_hdrs))
+        def res_body(*args):
+            return self.res_body(stream_id, *args)
+        def res_done(*args):
+            return self.res_done(stream_id, *args)
+        return res_body, res_done
 
-        try:
-            body_len = int(get_hdr(res_hdrs, "content-length").pop(0))
-        except (IndexError, ValueError):
-            body_len = None
-        if body_len is not None:
-            delimit = COUNTED
-            res_hdrs.append(("Connection", "keep-alive"))
-        elif 2.0 > self.req_version >= 1.1:
-            delimit = CHUNKED
-            res_hdrs.append(("Transfer-Encoding", "chunked"))
-        else:
-            delimit = CLOSE
-            res_hdrs.append(("Connection", "close"))
-
-        self._output_start("HTTP/1.1 %s %s" % (status_code, status_phrase), res_hdrs, delimit)
-        return self.res_body, self.res_done
-
-    def res_body(self, chunk):
+    def res_body(self, stream_id, chunk):
         "Send part of the response body. May be called zero to many times."
-        self._output_body(chunk)
+        if not chunk:
+            return
+        log.debug("res_body %s" % stream_id)
+        self._output(self._ser_data_frame(stream_id, FLAG_NONE, chunk))
 
-    def res_done(self, err):
+    def res_done(self, stream_id, err):
         """
         Signal the end of the response, whether or not there was a body. MUST be
         called exactly once for each response.
@@ -166,7 +152,9 @@ class HttpServerConnection(HttpMessageHandler):
         indicating that an HTTP-specific (i.e., non-application) error occured
         in the generation of the response; this is useful for debugging.
         """
-        self._output_end(err)
+        log.debug("res_done %s" % stream_id)
+        self._output(self._ser_data_frame(stream_id, FLAG_FIN, ""))
+        # TODO: delete stream after checking that input side is half-closed
 
     def req_body_pause(self, paused):
         "Indicate that the server should pause (True) or unpause (False) the request."
@@ -182,8 +170,7 @@ class HttpServerConnection(HttpMessageHandler):
 
     def _conn_closed(self):
         "The server connection has closed."
-        if self._output_state != WAITING:
-            pass # FIXME: any cleanup necessary?
+        pass # FIXME: any cleanup necessary?
 #        self.pause()
 #        self._queue = []
 #        self.tcp_conn.handler = None
@@ -192,48 +179,27 @@ class HttpServerConnection(HttpMessageHandler):
     # Methods called by common.HttpRequestHandler
 
     def _output(self, chunk):
+        self._debug("out: %s" % repr(chunk))
         self._tcp_conn.write(chunk)
 
-    def _input_start(self, top_line, hdr_tuples, conn_tokens, transfer_codes, content_length):
-        """
-        Take the top set of headers from the input stream, parse them
-        and queue the request to be processed by the application.
-        """
-        assert self._input_state == WAITING, "pipelining not supported" # FIXME: pipelining
-        try: 
-            method, _req_line = top_line.split(None, 1)
-            uri, req_version = _req_line.rsplit(None, 1)
-            self.req_version = float(req_version.rsplit('/', 1)[1])
-        except ValueError:
-            self._handle_error(ERR_HTTP_VERSION, top_line) # FIXME: more fine-grained
-            raise ValueError
-        if self.req_version == 1.1 and 'host' not in [t[0].lower() for t in hdr_tuples]:
-            self._handle_error(ERR_HOST_REQ)
-            raise ValueError
-        if hdr_tuples[:1][:1][:1] in [" ", "\t"]:
-            self._handle_error(ERR_WHITESPACE_HDR)
-        for code in transfer_codes: # we only support 'identity' and chunked' codes
-            if code not in ['identity', 'chunked']: 
-                # FIXME: SHOULD also close connection
-                self._handle_error(ERR_TRANSFER_CODE)
-                raise ValueError
-        # FIXME: MUST 400 request messages with whitespace between name and colon
-        self.method = method
-        self.connection_hdr = conn_tokens
+    def _input_start(self, stream_id, hdr_tuples):
+        log.debug("request start %s %s" % (stream_id, hdr_tuples))
+        method = get_hdr(hdr_tuples, 'method')
+        uri = get_hdr(hdr_tuples, 'uri')
+        assert not self._streams.has_key(stream_id) # FIXME
+        def res_start(*args):
+            return self.res_start(stream_id, *args)
+        self._streams[stream_id] = self.request_handler(
+            method, uri, hdr_tuples, res_start, self.req_body_pause)
 
-        log.info("%s server req_start %s %s %s" % (id(self), method, uri, self.req_version))
-        self.req_body_cb, self.req_done_cb = self.request_handler(
-                method, uri, hdr_tuples, self.res_start, self.req_body_pause)
-        allows_body = (content_length) or (transfer_codes != [])
-        return allows_body
-
-    def _input_body(self, chunk):
+    def _input_body(self, stream_id, chunk):
         "Process a request body chunk from the wire."
-        self.req_body_cb(chunk)
+        self._streams[stream_id][0](chunk)
     
-    def _input_end(self):
+    def _input_end(self, stream_id):
         "Indicate that the request body is complete."
-        self.req_done_cb(None)
+        self._streams[stream_id][1](None)
+        # TODO: delete stream if output side is half-closed.
 
     def _input_error(self, err, detail=None):
         "Indicate a parsing problem with the request body."
@@ -241,12 +207,10 @@ class HttpServerConnection(HttpMessageHandler):
         if self._tcp_conn:
             self._tcp_conn.close()
             self._tcp_conn = None
-        self.req_done_cb(err)
+        self._streams[stream_id][1](err)
 
     def _handle_error(self, err, detail=None):
         "Handle a problem with the request by generating an appropriate response."
-#        self._queue.append(ErrorHandler(status_code, status_phrase, body, self))
-        assert self._output_state == WAITING
         if detail:
             err['detail'] = detail
         status_code, status_phrase = err.get('status', ('400', 'Bad Request'))
@@ -267,14 +231,14 @@ def test_handler(method, uri, hdrs, res_start, req_pause):
     """
     code = "200"
     phrase = "OK"
-    res_hdrs = [('Content-Type', 'text/plain')]
+    res_hdrs = [('Content-Type', 'text/plain'), ('version', 'HTTP/1.1')]
     res_body, res_done = res_start(code, phrase, res_hdrs, dummy)
-    res_body('foo!')
+    res_body('This is SPDY.')
     res_done(None)
     return dummy, dummy
     
 if __name__ == "__main__":
     sys.stderr.write("PID: %s\n" % os.getpid())
     h, p = '127.0.0.1', int(sys.argv[1])
-    server = Server(h, p, test_handler)
+    server = SpdyServer(h, p, test_handler)
     push_tcp.run()
