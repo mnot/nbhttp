@@ -120,14 +120,15 @@ class SpdyMessageHandler:
             else:
                 self._input_buffer = data
         elif self._input_state == READING_FRAME_DATA:
-            # FIXME: > frame_len?
-            if len(data) == self._input_frame_len:
+            if len(data) >= self._input_frame_len:
+                frame_data = data[:self._input_frame_len]
+                rest = data[self._input_frame_len:]
                 if self._input_frame_type == DATA_FRAME:
-                    self._input_body(self._input_stream_id, data)
+                    self._input_body(self._input_stream_id, frame_data)
                 elif self._input_frame_type in [CTL_SYN_STREAM, CTL_SYN_REPLY]:
-                    stream_id = struct.unpack("!I", data[:4])[0] & 0x7fffffff
-                    hdr_tuples = self._parse_hdrs(data[8:]) or self._input_error(stream_id, 1) # FIXME
-                    self._debug("parsed %s headers; client said there were %s" % (len(hdr_tuples), struct.unpack("!H", data[6:8])[0]))
+                    stream_id = struct.unpack("!I", frame_data[:4])[0] & 0x7fffffff
+                    hdr_tuples = self._parse_hdrs(frame_data[8:]) or self._input_error(stream_id, 1) # FIXME
+#                    self._debug("parsed %s headers; client said there were %s" % (len(hdr_tuples), struct.unpack("!H", frame_data[6:8])[0]))
                     # throw away num pri, unused, num hdrs
                     self._input_start(stream_id, hdr_tuples)
                 elif self._input_frame_type == CTL_FIN_STREAM:
@@ -145,6 +146,8 @@ class SpdyMessageHandler:
                 if self._input_flags & FLAG_FIN: # FIXME: invalid on FIN_STREAM
                     self._input_end(stream_id)
                 self._input_state = WAITING
+                if rest:
+                    self._handle_input(rest)
             else: # don't have complete frame yet
                 self._input_buffer = data
         else:
