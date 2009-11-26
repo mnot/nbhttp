@@ -31,9 +31,23 @@ THE SOFTWARE.
 """
 
 import struct
-import zlib
+import c_zlib
 
 compressed_hdrs = False
+dictionary = \
+"optionsgetheadpostputdeletetraceacceptaccept-charsetaccept-encodingaccept-" \
+"languageauthorizationexpectfromhostif-modified-sinceif-matchif-none-matchi" \
+"f-rangeif-unmodifiedsincemax-forwardsproxy-authorizationrangerefererteuser" \
+"-agent10010120020120220320420520630030130230330430530630740040140240340440" \
+"5406407408409410411412413414415416417500501502503504505accept-rangesageeta" \
+"glocationproxy-authenticatepublicretry-afterservervarywarningwww-authentic" \
+"ateallowcontent-basecontent-encodingcache-controlconnectiondatetrailertran" \
+"sfer-encodingupgradeviawarningcontent-languagecontent-lengthcontent-locati" \
+"oncontent-md5content-rangecontent-typeetagexpireslast-modifiedset-cookieMo" \
+"ndayTuesdayWednesdayThursdayFridaySaturdaySundayJanFebMarAprMayJunJulAugSe" \
+"pOctNovDecchunkedtext/htmlimage/pngimage/jpgimage/gifapplication/xmlapplic" \
+"ation/xhtmltext/plainpublicmax-agecharset=iso-8859-1utf-8gzipdeflateHTTP/1" \
+".1statusversionurl"
 
 # states
 WAITING, READING_FRAME_DATA = 1, 2
@@ -71,6 +85,12 @@ class SpdyMessageHandler:
         self._input_flags = None
         self._input_stream_id = None
         self._input_frame_len = 0
+        if compressed_hdrs:
+            self._compress = c_zlib.Compressor(-1, dictionary)
+            self._decompress = c_zlib.Decompressor(dictionary)
+        else:
+            self._compress = lambda a:a
+            self._decompress = lambda a:a
 
     # input-related methods
 
@@ -110,12 +130,12 @@ class SpdyMessageHandler:
                     version = ( d1 >> 16 ) & 0x7fff
                     self._input_frame_type = d1 & 0x0000ffff
                     self._input_stream_id = None
-                    self._debug("CONTROL type %s len %s" % (self._input_frame_type, self._input_frame_len))
                 else: # data frame
                     self._input_frame_type = DATA_FRAME
                     self._input_stream_id = d1 & 0x7fffffff
                 self._input_frame_len = (( l1 << 16 ) + l2)
                 self._input_state = READING_FRAME_DATA
+                self._debug("frame type %s len %s" % (self._input_frame_type, self._input_frame_len))
                 self._handle_input(data[8:])
             else:
                 self._input_buffer = data
@@ -127,9 +147,9 @@ class SpdyMessageHandler:
                     self._input_body(self._input_stream_id, frame_data)
                 elif self._input_frame_type in [CTL_SYN_STREAM, CTL_SYN_REPLY]:
                     stream_id = struct.unpack("!I", frame_data[:4])[0] & 0x7fffffff
-                    hdr_tuples = self._parse_hdrs(frame_data[8:]) or self._input_error(stream_id, 1) # FIXME
-#                    self._debug("parsed %s headers; client said there were %s" % (len(hdr_tuples), struct.unpack("!H", frame_data[6:8])[0]))
-                    # throw away num pri, unused, num hdrs
+                    self._debug("incoming stream_id %s" % stream_id)
+                    hdr_tuples = self._parse_hdrs(frame_data[6:]) or self._input_error(stream_id, 1) # FIXME
+                    # throw away num pri, unused
                     self._input_start(stream_id, hdr_tuples)
                 elif self._input_frame_type == CTL_FIN_STREAM:
                     self._input_error(stream_id, err=1) # FIXME
@@ -142,7 +162,7 @@ class SpdyMessageHandler:
                 elif self._input_frame_type == CTL_GOAWAY:
                     pass # FIXME
                 else: # unknown frame type
-                    pass
+                    raise ValueError, "Unknown frame type" # FIXME
                 if self._input_flags & FLAG_FIN: # FIXME: invalid on FIN_STREAM
                     self._input_end(stream_id)
                 self._input_state = WAITING
@@ -153,13 +173,12 @@ class SpdyMessageHandler:
         else:
             raise Exception, "Unknown state %s" % self._input_state
 
-    @staticmethod
-    def _parse_hdrs(data):
+    def _parse_hdrs(self, data):
         "Given a control frame data block, return a list of (name, value) tuples."
         # TODO: separate null-delimited into separate instances
-        if compressed_hdrs:
-            data = zlib.decompress(data, -15)
-        cursor = 0
+#        data = self._decompress(data)
+        cursor = 2
+        (num_hdrs,) = struct.unpack("!h", data[:cursor])
         hdrs = []
         while cursor < len(data):
             try:
@@ -168,14 +187,19 @@ class SpdyMessageHandler:
                 name = data[cursor:cursor+name_len]
                 cursor += name_len
             except IndexError:
-                return
+                raise
+            except struct.error:
+                raise
             try:
                 (val_len,) = struct.unpack("!h", data[cursor:cursor+2])
                 cursor += 2
                 value = data[cursor:cursor+val_len]
                 cursor += val_len
             except IndexError:
-                return
+                raise
+            except struct.error:
+                print len(data), cursor, data
+                raise
             hdrs.append((name, value))
         return hdrs
 
@@ -190,9 +214,9 @@ class SpdyMessageHandler:
     def _ser_syn_frame(self, type, flags, stream_id, hdr_tuples):
         "Returns a SPDY SYN_[STREAM|REPLY] frame."
         hdrs = self._ser_hdrs(hdr_tuples)
-        data = struct.pack("!II%ds" % len(hdrs),
+        data = struct.pack("!IH%ds" % len(hdrs),
             0x7FFFFFFFFFFFFFFF & stream_id,
-            len(hdr_tuples),
+            0x00,  # unused
             hdrs
         )
         return self._ser_ctl_frame(type, flags, data)
@@ -218,19 +242,15 @@ class SpdyMessageHandler:
             data
         )
 
-    @staticmethod
-    def _ser_hdrs(hdr_tuples):
+    def _ser_hdrs(self, hdr_tuples):
         "Returns a SPDY header block from a list of (name, value) tuples."
         # TODO: collapse dups into null-delimited
-        fmt = ["!"]
-        args = []
         hdr_tuples.sort() # required by Chromium
+        fmt = ["!H"]
+        args = [len(hdr_tuples)]
         for (n,v) in hdr_tuples:
             # TODO: check for overflowing n, v lengths
             fmt.append("H%dsH%ds" % (len(n), len(v)))
             args.extend([len(n), n, len(v), v])
         data = struct.pack("".join(fmt), *args)
-        if compressed_hdrs:
-            data = zlib.compress(data)[2:-4]
-        return data
-
+        return self._compress(data) # [2:-4]
