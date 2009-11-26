@@ -184,8 +184,8 @@ class SpdyServerConnection(SpdyMessageHandler):
 
     def _input_start(self, stream_id, hdr_tuples):
         log.debug("request start %s %s" % (stream_id, hdr_tuples))
-        method = get_hdr(hdr_tuples, 'method')
-        uri = get_hdr(hdr_tuples, 'uri')
+        method = get_hdr(hdr_tuples, 'method')[0]
+        uri = get_hdr(hdr_tuples, 'url')[0]
         assert not self._streams.has_key(stream_id) # FIXME
         def res_start(*args):
             return self.res_start(stream_id, *args)
