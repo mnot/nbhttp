@@ -145,6 +145,7 @@ class SpdyMessageHandler:
                 rest = data[self._input_frame_len:]
                 if self._input_frame_type == DATA_FRAME:
                     self._input_body(self._input_stream_id, frame_data)
+                    stream_id = self._input_stream_id # for FLAG_FIN below
                 elif self._input_frame_type in [CTL_SYN_STREAM, CTL_SYN_REPLY]:
                     stream_id = struct.unpack("!I", frame_data[:4])[0] & 0x7fffffff
                     self._debug("incoming stream_id %s" % stream_id)
