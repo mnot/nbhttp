@@ -90,7 +90,7 @@ from urlparse import urlsplit
 
 logging.basicConfig()
 log = logging.getLogger('client')
-log.setLevel(logging.DEBUG)
+log.setLevel(logging.INFO)
 
 import push_tcp
 from http_common import WAITING, \
@@ -106,9 +106,8 @@ req_remove_hdrs = hop_by_hop_hdrs + ['host']
 
 class SpdyClient(SpdyMessageHandler):
     "An asynchronous SPDY client."
-    def __init__(self, proxy=None):
-        self.proxy = proxy
-        self.connect_timeout = None
+    proxy = None
+    connect_timeout = None
 
     def req_start(self, method, uri, req_hdrs, res_start_cb, req_body_pause):
         """
