@@ -60,6 +60,7 @@ Z_NULL = 0x00
 Z_OK = 0x00
 Z_STREAM_END = 0x01
 Z_NEED_DICT = 0x02
+Z_BUF_ERR = -0x05
 
 Z_NO_FLUSH = 0x00
 Z_SYNC_FLUSH = 0x02
@@ -95,7 +96,7 @@ class Compressor:
             err = _zlib.deflate(C.byref(self.st), Z_FINISH)
             out.append(outbuf[:CHUNK-self.st.avail_out])
             if err == Z_STREAM_END: break
-            elif err == Z_OK: pass
+            elif err in [Z_OK, Z_BUF_ERR]: pass
             else:
                 raise AssertionError, err
         return "".join(out)
@@ -139,6 +140,8 @@ class Decompressor:
                 assert err == Z_OK, err
             elif err in [Z_OK, Z_STREAM_END]:
                 out.append(outbuf[:CHUNK-self.st.avail_out])
+            elif err == Z_BUF_ERR:
+                pass
             else:
                 raise AssertionError, err
             if err == Z_STREAM_END:
