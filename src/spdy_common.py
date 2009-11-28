@@ -214,11 +214,10 @@ class SpdyMessageHandler:
 
     def _ser_syn_frame(self, type, flags, stream_id, hdr_tuples):
         "Returns a SPDY SYN_[STREAM|REPLY] frame."
-        hdrs = self._ser_hdrs(hdr_tuples)
         data = struct.pack("!IH%ds" % len(hdrs),
             0x7FFFFFFFFFFFFFFF & stream_id,
             0x00,  # unused
-            hdrs
+            self._ser_hdrs(hdr_tuples)
         )
         return self._ser_ctl_frame(type, flags, data)
 
