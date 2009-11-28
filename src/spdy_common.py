@@ -66,6 +66,7 @@ CTL_GOAWAY = 0x07
 FLAG_NONE = 0x00
 FLAG_FIN = 0x01
 
+STREAM_MASK = 0x7fffffff
 
 class SpdyMessageHandler:
     """
@@ -214,10 +215,11 @@ class SpdyMessageHandler:
 
     def _ser_syn_frame(self, type, flags, stream_id, hdr_tuples):
         "Returns a SPDY SYN_[STREAM|REPLY] frame."
+        hdrs = self._ser_hdrs(hdr_tuples)
         data = struct.pack("!IH%ds" % len(hdrs),
-            0x7FFFFFFFFFFFFFFF & stream_id,
+            STREAM_MASK & stream_id,
             0x00,  # unused
-            self._ser_hdrs(hdr_tuples)
+            hdrs
         )
         return self._ser_ctl_frame(type, flags, data)
 
@@ -237,7 +239,7 @@ class SpdyMessageHandler:
         "Returns a SPDY data frame."
         # TODO: check that stream_id and data len don't overflow
         return struct.pack("!II%ds" % len(data),
-            0x7FFFFFFFFFFFFFFF & stream_id,
+            STREAM_MASK & stream_id,
             (flags << 24) + len(data),
             data
         )
