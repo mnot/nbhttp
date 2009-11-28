@@ -33,7 +33,7 @@ THE SOFTWARE.
 import struct
 import c_zlib
 
-compressed_hdrs = False
+compressed_hdrs = True
 dictionary = \
 "optionsgetheadpostputdeletetraceacceptaccept-charsetaccept-encodingaccept-" \
 "languageauthorizationexpectfromhostif-modified-sinceif-matchif-none-matchi" \
@@ -133,7 +133,7 @@ class SpdyMessageHandler:
                     self._input_stream_id = None
                 else: # data frame
                     self._input_frame_type = DATA_FRAME
-                    self._input_stream_id = d1 & 0x7fffffff
+                    self._input_stream_id = d1 & STREAM_MASK
                 self._input_frame_len = (( l1 << 16 ) + l2)
                 self._input_state = READING_FRAME_DATA
                 self._debug("frame type %s len %s" % (self._input_frame_type, self._input_frame_len))
@@ -148,7 +148,7 @@ class SpdyMessageHandler:
                     self._input_body(self._input_stream_id, frame_data)
                     stream_id = self._input_stream_id # for FLAG_FIN below
                 elif self._input_frame_type in [CTL_SYN_STREAM, CTL_SYN_REPLY]:
-                    stream_id = struct.unpack("!I", frame_data[:4])[0] & 0x7fffffff
+                    stream_id = struct.unpack("!I", frame_data[:4])[0] & STREAM_MASK
                     self._debug("incoming stream_id %s" % stream_id)
                     hdr_tuples = self._parse_hdrs(frame_data[6:]) or self._input_error(stream_id, 1) # FIXME
                     # throw away num pri, unused
@@ -178,6 +178,7 @@ class SpdyMessageHandler:
     def _parse_hdrs(self, data):
         "Given a control frame data block, return a list of (name, value) tuples."
         # TODO: separate null-delimited into separate instances
+        print repr(data)
         data = self._decompress(data)
         cursor = 2
         (num_hdrs,) = struct.unpack("!h", data[:cursor])
@@ -255,4 +256,4 @@ class SpdyMessageHandler:
             fmt.append("H%dsH%ds" % (len(n), len(v)))
             args.extend([len(n), n, len(v), v])
         data = struct.pack("".join(fmt), *args)
-        return self._compress(data) # [2:-4]
+        return self._compress(data)
