@@ -4,6 +4,11 @@
 A simple HTTP->SPDY proxy.
 """
 
+# config
+backend_authority = None # for reverse proxies
+forward_proxy = ('test.mnot.net', 3128) # for forward proxies with parents
+# end config
+
 
 import logging
 import sys
@@ -19,25 +24,26 @@ except ImportError:
 
 logging.basicConfig()
 log = logging.getLogger('server')
-log.setLevel(logging.DEBUG)
+log.setLevel(logging.INFO)
 
 class ProxyClient(SpdyClient):
     read_timeout = 10
     connect_timeout = 15
+    proxy = forward_proxy
 
 def proxy_handler(method, uri, req_hdrs, s_res_start, req_pause):
     # can modify method, uri, req_hdrs here
     print uri
-    (scheme, authority, path, query, fragid) = urlsplit(uri)
-    uri = urlunsplit((scheme, backend_authority, path, query, fragid))
+    if backend_authority:
+        (scheme, authority, path, query, fragid) = urlsplit(uri)
+        uri = urlunsplit((scheme, backend_authority, path, query, fragid))
     def c_res_start(version, status, phrase, res_hdrs, res_pause):
         # can modify status, phrase, res_hdrs here
         res_hdrs = [(n.lower(),v.strip()) for (n,v) in res_hdrs if n.lower() not in ['connection', 'content-length', 'transfer-encoding', 'keep-alive']]
         res_body, res_done = s_res_start(status, phrase, res_hdrs, res_pause)
         # can modify res_body here
         return res_body, res_done
-    c = ProxyClient(c_res_start)
-    req_body, req_done = c.req_start(method, uri, req_hdrs, req_pause)
+    req_body, req_done = client.req_start(method, uri, req_hdrs, c_res_start, req_pause)
     # can modify req_body here
     return req_body, req_done
 
@@ -45,6 +51,6 @@ def proxy_handler(method, uri, req_hdrs, s_res_start, req_pause):
 if __name__ == "__main__":
     import sys
     port = int(sys.argv[1])
-    backend_authority = sys.argv[2]
+    client = ProxyClient()
     server = Server('', port, proxy_handler)
     run()
