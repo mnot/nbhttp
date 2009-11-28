@@ -178,7 +178,6 @@ class SpdyMessageHandler:
     def _parse_hdrs(self, data):
         "Given a control frame data block, return a list of (name, value) tuples."
         # TODO: separate null-delimited into separate instances
-        print repr(data)
         data = self._decompress(data)
         cursor = 2
         (num_hdrs,) = struct.unpack("!h", data[:cursor])

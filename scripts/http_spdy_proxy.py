@@ -6,7 +6,7 @@ A simple HTTP->SPDY proxy.
 
 # config
 backend_authority = None # for reverse proxies
-forward_proxy = ('test.mnot.net', 3128) # for forward proxies with parents
+forward_proxy = None # for forward proxies with parents
 # end config
 
 
