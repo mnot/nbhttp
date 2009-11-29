@@ -95,10 +95,9 @@ from http_common import get_hdr, dummy
 
 logging.basicConfig()
 log = logging.getLogger('server')
-log.setLevel(logging.DEBUG)
+log.setLevel(logging.INFO)
 
 # FIXME: assure that the connection isn't closed before reading the entire req body
-# TODO: filter out 100 responses to HTTP/1.0 clients that didn't ask for it.
 
 class SpdyServer:
     "An asynchronous SPDY server."
@@ -179,7 +178,6 @@ class SpdyServerConnection(SpdyMessageHandler):
     # Methods called by common.HttpRequestHandler
 
     def _output(self, chunk):
-        self._debug("out: %s" % repr(chunk))
         self._tcp_conn.write(chunk)
 
     def _input_start(self, stream_id, hdr_tuples):
