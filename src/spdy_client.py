@@ -62,6 +62,8 @@ indicated length are incorrect). In these cases, res_done will still be called
 with the appropriate error dictionary.
 """
 
+# FIXME: update docs for API change (move res_start)
+
 __author__ = "Mark Nottingham <mnot@mnot.net>"
 __copyright__ = """\
 Copyright (c) 2008-2009 Mark Nottingham
@@ -85,23 +87,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
-import logging
 from urlparse import urlsplit
 
-logging.basicConfig()
-log = logging.getLogger('client')
-log.setLevel(logging.INFO)
-
 import push_tcp
+from error import ERR_CONNECT, ERR_URL
 from http_common import WAITING, \
-    idempotent_methods, no_body_status, hop_by_hop_hdrs, \
-    dummy, get_hdr
+    hop_by_hop_hdrs, dummy, get_hdr
 from spdy_common import SpdyMessageHandler, CTL_SYN_STREAM, FLAG_NONE, FLAG_FIN
 
 req_remove_hdrs = hop_by_hop_hdrs + ['host']
 
-# TODO: proxy support
-# TODO: next-hop version cache for Expect/Continue, etc.
 # TODO: read timeout support (needs to be in push_tcp?)
 
 class SpdyClient(SpdyMessageHandler):
@@ -117,8 +112,6 @@ class SpdyClient(SpdyMessageHandler):
 
         Returns a (req_body, req_done) tuple.
         """
-        req_hdrs = [i for i in req_hdrs \
-            if not i[0].lower() in req_remove_hdrs]
         if self.proxy:
             (host, port) = self.proxy
         else: # find out where to connect to the hard way
@@ -144,16 +137,17 @@ class SpdyClient(SpdyMessageHandler):
 class SpdyConnection(SpdyMessageHandler):
     "A SPDY connection."
 
-    def __init__(self):
+    def __init__(self, log=None):
         SpdyMessageHandler.__init__(self)
+        self.log = log or dummy
         self._tcp_conn = None
-        self._req_body_pause_cb = None  # FIXME
+        self._req_body_pause_cb = None  # FIXME: re-think pausing
         self._streams = {}
         self._output_buffer = []
         self._highest_stream_id = -1
-        self._debug = log.debug
 
     def req_start(self, method, uri, req_hdrs, res_start_cb, req_body_pause):
+        req_hdrs = [i for i in req_hdrs if not i[0].lower() in req_remove_hdrs]
         req_hdrs.append(('method', method))
         req_hdrs.append(('url', uri))
         req_hdrs.append(('version', 'HTTP/1.1'))
@@ -169,7 +163,6 @@ class SpdyConnection(SpdyMessageHandler):
 
     def req_body(self, stream_id, chunk):
         "Send part of the request body. May be called zero to many times."
-        # FIXME: self._handle_error(ERR_LEN_REQ)
         self._output(self._ser_data_frame(stream_id, FLAG_NONE, chunk))
         
     def req_done(self, stream_id, err):
@@ -300,7 +293,9 @@ class _SpdyConnectionPool:
             )
             self._conns[(host, port)] = conn
         return conn
-        
+
+    #TODO: remove conns from _conns when they close
+
 _conn_pool = _SpdyConnectionPool()
 
 

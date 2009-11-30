@@ -10,7 +10,6 @@ setup(name='nbhttp',
       url='http://github.com/mnot/nbhttp/',
       packages=['nbhttp'],
       package_dir={'nbhttp': 'src'},
-      scripts=['scripts/proxy.py'],
       classifiers=[
            'Development Status :: 4 - Beta',
            'Intended Audience :: Developers',

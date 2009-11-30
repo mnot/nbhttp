@@ -4,7 +4,7 @@
 shared SPDY infrastructure
 
 This module contains utility functions for nbhttp and a base class
-for the parsing portions of the client and server.
+for the SPDY-specific portions of the client and server.
 """
 
 __author__ = "Mark Nottingham <mnot@mnot.net>"
@@ -31,7 +31,9 @@ THE SOFTWARE.
 """
 
 import struct
+
 import c_zlib
+from http_common import dummy
 
 compressed_hdrs = True
 dictionary = \
@@ -80,6 +82,7 @@ class SpdyMessageHandler:
     """
 
     def __init__(self):
+        self.log = lambda a:a
         self._input_buffer = ""
         self._input_state = WAITING
         self._input_frame_type = None
@@ -90,8 +93,8 @@ class SpdyMessageHandler:
             self._compress = c_zlib.Compressor(-1, dictionary)
             self._decompress = c_zlib.Decompressor(dictionary)
         else:
-            self._compress = lambda a:a
-            self._decompress = lambda a:a
+            self._compress = dummy
+            self._decompress = dummy
 
     # input-related methods
 
@@ -125,18 +128,17 @@ class SpdyMessageHandler:
             self._input_buffer = ""
         if self._input_state == WAITING: # waiting for a complete frame header
             if len(data) >= 8:
-                (d1, self._input_flags, l1, l2) = struct.unpack("!IBBH", data[:8])
+                (d1, self._input_flags, d2, d3) = struct.unpack("!IBBH", data[:8])
                 if d1 >> 31 & 0x01: # control frame
+                    version = ( d1 >> 16 ) & 0x7fff # TODO: check version
                     # FIXME: we use 0x00 internally to indicate data frame
-                    version = ( d1 >> 16 ) & 0x7fff
                     self._input_frame_type = d1 & 0x0000ffff
                     self._input_stream_id = None
                 else: # data frame
                     self._input_frame_type = DATA_FRAME
                     self._input_stream_id = d1 & STREAM_MASK
-                self._input_frame_len = (( l1 << 16 ) + l2)
+                self._input_frame_len = (( d2 << 16 ) + d3)
                 self._input_state = READING_FRAME_DATA
-                self._debug("frame type %s len %s" % (self._input_frame_type, self._input_frame_len))
                 self._handle_input(data[8:])
             else:
                 self._input_buffer = data
@@ -148,23 +150,22 @@ class SpdyMessageHandler:
                     self._input_body(self._input_stream_id, frame_data)
                     stream_id = self._input_stream_id # for FLAG_FIN below
                 elif self._input_frame_type in [CTL_SYN_STREAM, CTL_SYN_REPLY]:
-                    stream_id = struct.unpack("!I", frame_data[:4])[0] & STREAM_MASK
-                    self._debug("incoming stream_id %s" % stream_id)
-                    hdr_tuples = self._parse_hdrs(frame_data[6:]) or self._input_error(stream_id, 1) # FIXME
-                    # throw away num pri, unused
+                    stream_id = struct.unpack("!I", frame_data[:4])[0] & STREAM_MASK # FIXME: what if they lied about the frame len?
+                    hdr_tuples = self._parse_hdrs(frame_data[6:]) or self._input_error(stream_id, 1) # FIXME: proper error here
+                    # FIXME: expose pri
                     self._input_start(stream_id, hdr_tuples)
                 elif self._input_frame_type == CTL_FIN_STREAM:
-                    self._input_error(stream_id, err=1) # FIXME
+                    self._input_error(stream_id, err=1) # FIXME: proper error here
                 elif self._input_frame_type == CTL_HELLO:
-                    pass
+                    pass # FIXME
                 elif self._input_frame_type == CTL_NOOP:
                     pass
                 elif self._input_frame_type == CTL_PING:
-                    pass
+                    pass # FIXME
                 elif self._input_frame_type == CTL_GOAWAY:
                     pass # FIXME
                 else: # unknown frame type
-                    raise ValueError, "Unknown frame type" # FIXME
+                    raise ValueError, "Unknown frame type" # FIXME: don't puke
                 if self._input_flags & FLAG_FIN: # FIXME: invalid on FIN_STREAM
                     self._input_end(stream_id)
                 self._input_state = WAITING
@@ -173,34 +174,34 @@ class SpdyMessageHandler:
             else: # don't have complete frame yet
                 self._input_buffer = data
         else:
-            raise Exception, "Unknown state %s" % self._input_state
+            raise Exception, "Unknown input state %s" % self._input_state
 
     def _parse_hdrs(self, data):
         "Given a control frame data block, return a list of (name, value) tuples."
         # TODO: separate null-delimited into separate instances
-        data = self._decompress(data)
+        data = self._decompress(data) # FIXME: catch errors
         cursor = 2
-        (num_hdrs,) = struct.unpack("!h", data[:cursor])
+        (num_hdrs,) = struct.unpack("!h", data[:cursor]) # FIXME: catch errors
         hdrs = []
         while cursor < len(data):
             try:
-                (name_len,) = struct.unpack("!h", data[cursor:cursor+2])
+                (name_len,) = struct.unpack("!h", data[cursor:cursor+2]) # FIXME: catch errors
                 cursor += 2
-                name = data[cursor:cursor+name_len]
+                name = data[cursor:cursor+name_len] # FIXME: catch errors
                 cursor += name_len
             except IndexError:
                 raise
             except struct.error:
                 raise
             try:
-                (val_len,) = struct.unpack("!h", data[cursor:cursor+2])
+                (val_len,) = struct.unpack("!h", data[cursor:cursor+2]) # FIXME: catch errors
                 cursor += 2
-                value = data[cursor:cursor+val_len]
+                value = data[cursor:cursor+val_len] # FIXME: catch errors
                 cursor += val_len
             except IndexError:
                 raise
             except struct.error:
-                print len(data), cursor, data
+                print len(data), cursor, data # FIXME
                 raise
             hdrs.append((name, value))
         return hdrs
@@ -215,7 +216,7 @@ class SpdyMessageHandler:
 
     def _ser_syn_frame(self, type, flags, stream_id, hdr_tuples):
         "Returns a SPDY SYN_[STREAM|REPLY] frame."
-        hdrs = self._ser_hdrs(hdr_tuples)
+        hdrs = self._compress(self._ser_hdrs(hdr_tuples))
         data = struct.pack("!IH%ds" % len(hdrs),
             STREAM_MASK & stream_id,
             0x00,  # unused
@@ -244,7 +245,8 @@ class SpdyMessageHandler:
             data
         )
 
-    def _ser_hdrs(self, hdr_tuples):
+    @staticmethod
+    def _ser_hdrs(hdr_tuples):
         "Returns a SPDY header block from a list of (name, value) tuples."
         # TODO: collapse dups into null-delimited
         hdr_tuples.sort() # required by Chromium
@@ -254,5 +256,4 @@ class SpdyMessageHandler:
             # TODO: check for overflowing n, v lengths
             fmt.append("H%dsH%ds" % (len(n), len(v)))
             args.extend([len(n), n, len(v), v])
-        data = struct.pack("".join(fmt), *args)
-        return self._compress(data)
+        return struct.pack("".join(fmt), *args)

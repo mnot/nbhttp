@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
 """
-Non-Blocking HTTP Server
+Non-Blocking SPDY Server
 
-This library allow implementation of an HTTP/1.1 server that is "non-blocking,"
+This library allow implementation of an SPDY server that is "non-blocking,"
 "asynchronous" and "event-driven" -- i.e., it achieves very high performance
 and concurrency, so long as the application code does not block (e.g.,
 upon network, disk or database access). Blocking on one request will block
@@ -113,18 +113,18 @@ class SpdyServer:
 
 class SpdyServerConnection(SpdyMessageHandler):
     "A handler for a SPDY server connection."
-    def __init__(self, request_handler, tcp_conn):
+    def __init__(self, request_handler, tcp_conn, log=None):
         SpdyMessageHandler.__init__(self)
         self.request_handler = request_handler
         self._tcp_conn = tcp_conn
+        self.log = log or dummy
         self._streams = {}
         self._res_body_pause_cb = False
-        self._debug = log.debug
-        self._debug("new connection %s" % id(self))
+        self.log.debug("new connection %s" % id(self))
 
     def res_start(self, stream_id, status_code, status_phrase, res_hdrs, res_body_pause):
         "Start a response. Must only be called once per response."
-        log.debug("res_start %s" % stream_id)
+        self.log.debug("res_start %s" % stream_id)
         self._res_body_pause_cb = res_body_pause
         res_hdrs.append(('status', "%s %s" % (status_code, status_phrase)))
         # TODO: hop-by-hop headers?
@@ -137,10 +137,8 @@ class SpdyServerConnection(SpdyMessageHandler):
 
     def res_body(self, stream_id, chunk):
         "Send part of the response body. May be called zero to many times."
-        if not chunk:
-            return
-        log.debug("res_body %s" % stream_id)
-        self._output(self._ser_data_frame(stream_id, FLAG_NONE, chunk))
+        if chunk:
+            self._output(self._ser_data_frame(stream_id, FLAG_NONE, chunk))
 
     def res_done(self, stream_id, err):
         """
@@ -151,7 +149,6 @@ class SpdyServerConnection(SpdyMessageHandler):
         indicating that an HTTP-specific (i.e., non-application) error occured
         in the generation of the response; this is useful for debugging.
         """
-        log.debug("res_done %s" % stream_id)
         self._output(self._ser_data_frame(stream_id, FLAG_FIN, ""))
         # TODO: delete stream after checking that input side is half-closed
 
@@ -171,22 +168,23 @@ class SpdyServerConnection(SpdyMessageHandler):
         "The server connection has closed."
         pass # FIXME: any cleanup necessary?
 #        self.pause()
-#        self._queue = []
 #        self.tcp_conn.handler = None
 #        self.tcp_conn = None
 
-    # Methods called by common.HttpRequestHandler
+    # Methods called by common.SpdyRequestHandler
 
     def _output(self, chunk):
-        self._tcp_conn.write(chunk)
+        if self._tcp_conn:
+            self._tcp_conn.write(chunk)
 
     def _input_start(self, stream_id, hdr_tuples):
-        log.debug("request start %s %s" % (stream_id, hdr_tuples))
-        method = get_hdr(hdr_tuples, 'method')[0]
-        uri = get_hdr(hdr_tuples, 'url')[0]
+        self.log.debug("request start %s %s" % (stream_id, hdr_tuples))
+        method = get_hdr(hdr_tuples, 'method')[0] # FIXME: error handling
+        uri = get_hdr(hdr_tuples, 'url')[0] # FIXME: error handling
         assert not self._streams.has_key(stream_id) # FIXME
         def res_start(*args):
             return self.res_start(stream_id, *args)
+        # TODO: sanity checks / catch errors from requst_handler
         self._streams[stream_id] = self.request_handler(
             method, uri, hdr_tuples, res_start, self.req_body_pause)
 
@@ -201,12 +199,14 @@ class SpdyServerConnection(SpdyMessageHandler):
 
     def _input_error(self, err, detail=None):
         "Indicate a parsing problem with the request body."
+        # FIXME: rework after fixing spdy_common
         err['detail'] = detail
         if self._tcp_conn:
             self._tcp_conn.close()
             self._tcp_conn = None
         self._streams[stream_id][1](err)
 
+    # TODO: re-evaluate if this is necessary in SPDY
     def _handle_error(self, err, detail=None):
         "Handle a problem with the request by generating an appropriate response."
         if detail:
@@ -236,7 +236,10 @@ def test_handler(method, uri, hdrs, res_start, req_pause):
     return dummy, dummy
     
 if __name__ == "__main__":
-    sys.stderr.write("PID: %s\n" % os.getpid())
+    logging.basicConfig()
+    log = logging.getLogger('server')
+    log.setLevel(logging.INFO)
+    log.info("PID: %s\n" % os.getpid())
     h, p = '127.0.0.1', int(sys.argv[1])
-    server = SpdyServer(h, p, test_handler)
+    server = SpdyServer(h, p, test_handler, log)
     push_tcp.run()

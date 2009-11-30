@@ -27,7 +27,6 @@ class ProxyClient(Client):
 
 def proxy_handler(method, uri, req_hdrs, s_res_start, req_pause):
     # can modify method, uri, req_hdrs here
-    print uri
     if backend_authority:
         (scheme, authority, path, query, fragid) = urlsplit(uri)
         uri = urlunsplit((scheme, backend_authority, path, query, fragid))
