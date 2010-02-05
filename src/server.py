@@ -90,7 +90,7 @@ import sys
 import logging
 
 import push_tcp
-from common import HttpMessageHandler, \
+from http_common import HttpMessageHandler, \
     CLOSE, COUNTED, CHUNKED, \
     WAITING, HEADERS_DONE, \
     hop_by_hop_hdrs, \

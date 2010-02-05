@@ -88,7 +88,7 @@ THE SOFTWARE.
 from urlparse import urlsplit, urlunsplit
 
 import push_tcp
-from common import HttpMessageHandler, \
+from http_common import HttpMessageHandler, \
     CLOSE, COUNTED, NOBODY, \
     WAITING, HEADERS_DONE, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
