@@ -158,15 +158,15 @@ class HttpMessageHandler:
         else:
             self._input_end()
         self._input_state = WAITING
-#               self._handle_input(instr)
+#       self._handle_input(instr)
 
     def _handle_close(self, instr):
         "Handle input where the body is delimited by the connection closing."
         self._input_body(instr)
 
     def _handle_chunked(self, instr):
-        "Handle input where the body is delimted by chunked encoding."
-        if self._input_body_left > 0:
+        "Handle input where the body is delimited by chunked encoding."
+        if self._input_body_left > 0: # we're in the middle of reading a chunk
             if self._input_body_left < len(instr): # got more than the chunk
                 this_chunk = self._input_body_left
                 self._input_body(instr[:this_chunk])
@@ -178,7 +178,7 @@ class HttpMessageHandler:
             else: # got partial chunk
                 self._input_body(instr)
                 self._input_body_left -= len(instr)
-        elif self._input_body_left == 0: # done
+        elif self._input_body_left == 0: # body is done
             if len(instr) >= 2 and instr[:2] == linesep:
                 self._input_state = WAITING
                 self._input_end()
