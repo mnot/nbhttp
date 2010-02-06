@@ -203,7 +203,7 @@ class HttpMessageHandler:
                     self._input_buffer += instr
                 return
             if chunk_size.strip() == "": # ignore bare lines
-                return self._handle_input(rest)
+                return self._handle_chunked(rest)
             if ";" in chunk_size: # ignore chunk extensions
                 chunk_size = chunk_size.split(";", 1)[0]
             try:
@@ -211,7 +211,7 @@ class HttpMessageHandler:
             except ValueError:
                 self._input_error(ERR_CHUNK, chunk_size)
                 return # blow up if we can't process a chunk.
-            self._handle_input(rest)
+            self._handle_chunked(rest)
 
     def _handle_counted(self, instr):
         "Handle input where the body is delimited by the Content-Length."
