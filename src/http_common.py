@@ -152,6 +152,7 @@ class HttpMessageHandler:
             raise Exception, "Unknown state %s" % self._input_state
 
     def _handle_nobody(self, instr):
+        "Handle input that shouldn't have a body."
         if instr:
             self._input_error(ERR_BODY_FORBIDDEN, instr) # FIXME: will not work with pipelining
         else:
@@ -160,9 +161,11 @@ class HttpMessageHandler:
 #               self._handle_input(instr)
 
     def _handle_close(self, instr):
+        "Handle input where the body is delimited by the connection closing."
         self._input_body(instr)
 
     def _handle_chunked(self, instr):
+        "Handle input where the body is delimted by chunked encoding."
         if self._input_body_left > 0:
             if self._input_body_left < len(instr): # got more than the chunk
                 this_chunk = self._input_body_left
@@ -211,6 +214,7 @@ class HttpMessageHandler:
             self._handle_input(rest)
 
     def _handle_counted(self, instr):
+        "Handle input where the body is delimited by the Content-Length."
         assert self._input_body_left >= 0, \
             "message counting problem (%s)" % self._input_body_left
         # process body
