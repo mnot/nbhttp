@@ -114,6 +114,8 @@ class Client(HttpMessageHandler):
         self.method = None
         self.uri = None
         self.req_hdrs = []
+        self._host = None
+        self._port = None
         self._tcp_conn = None
         self._conn_reusable = False
         self._req_body_pause_cb = None
@@ -139,19 +141,19 @@ class Client(HttpMessageHandler):
         if "@" in authority:
             userinfo, authority = authority.split("@", 1)
         if ":" in authority:
-            host, port = authority.rsplit(":", 1)
+            self._host, port = authority.rsplit(":", 1)
             try:
-                port = int(port)
+                self._port = int(port)
             except ValueError:
                 self._handle_error(ERR_URL, "Non-integer port in URL")
                 return dummy, dummy
         else:
-            host, port = authority, 80
+            self._host, self._port = authority, 80
         if path == "":
             path = "/"
         uri = urlunsplit(('', '', path, query, ''))
         self.method, self.uri, self.req_hdrs = method, uri, req_hdrs
-        self.req_hdrs.append(("Host", host)) # FIXME: port
+        self.req_hdrs.append(("Host", authority))
         self.req_hdrs.append(("Connection", "keep-alive"))
         try:
             body_len = int(get_hdr(req_hdrs, "content-length").pop(0))
@@ -160,7 +162,8 @@ class Client(HttpMessageHandler):
             body_len = None
             delimit = NOBODY
         self._output_start("%s %s HTTP/1.1" % (self.method, self.uri), self.req_hdrs, delimit)
-        _idle_pool.attach(host, port, self._handle_connect, self._handle_connect_error, self.connect_timeout)
+        _idle_pool.attach(self._host, self._port,
+          self._handle_connect, self._handle_connect_error, self.connect_timeout)
         return self.req_body, self.req_done
     # TODO: if we sent Expect: 100-continue, don't wait forever (i.e., schedule something)
 
@@ -235,7 +238,7 @@ class Client(HttpMessageHandler):
         if self._timeout_ev:
             self._timeout_ev.delete()
         self._retries += 1
-        _idle_pool.attach(self._tcp_conn.host, self._tcp_conn.port, 
+        _idle_pool.attach(self._host, self._port, 
             self._handle_connect, self._handle_connect_error, self.connect_timeout)
 
     def _req_body_pause(self, paused):
