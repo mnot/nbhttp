@@ -171,7 +171,7 @@ class HttpMessageHandler:
                 this_chunk = self._input_body_left
                 self._input_body(instr[:this_chunk])
                 self._input_body_left = -1
-                self._handle_input(instr[this_chunk+2:]) # +2 consumes the CRLF
+                self._handle_chunked(instr[this_chunk+2:]) # +2 consumes the CRLF
             elif self._input_body_left == len(instr): # got the whole chunk exactly
                 self._input_body(instr)
                 self._input_body_left = -1
@@ -182,13 +182,13 @@ class HttpMessageHandler:
             if len(instr) >= 2 and instr[:2] == linesep:
                 self._input_state = WAITING
                 self._input_end()
-                self._handle_input(instr[2:])
-            elif hdr_end.search(instr):
+#                self._handle_input(instr[2:]) # pipelining
+            elif hdr_end.search(instr): # trailers
                 self._input_state = WAITING
                 self._input_end()
                 trailers, rest = hdr_end.split(instr, 1) # TODO: process trailers
-                self._handle_input(rest)
-            else:
+#                self._handle_input(rest) # pipelining
+            else: # don't have full headers yet
                 self._input_buffer = instr
         else: # new chunk
             try:
