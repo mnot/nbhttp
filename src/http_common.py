@@ -36,7 +36,7 @@ hdr_end = re.compile(r"\r?\n\r?\n", re.M)
 linesep = "\r\n" 
 
 # conn_modes
-CLOSE, COUNTED, CHUNKED, NOBODY = 0, 1, 2, 3
+CLOSE, COUNTED, CHUNKED, NOBODY = 'close', 'counted', 'chunked', 'nobody'
 
 # states
 WAITING, HEADERS_DONE = 1, 2
@@ -144,81 +144,87 @@ class HttpMessageHandler:
             else: # partial headers; store it and wait for more
                 self._input_buffer = instr
         elif self._input_state == HEADERS_DONE:
-            if self._input_delimit == NOBODY: # a message without a body
-                if instr:
-                    self._input_error(ERR_BODY_FORBIDDEN, instr) # FIXME: will not work with pipelining
-                else:
-                    self._input_end()
-                self._input_state = WAITING
-#               self._handle_input(instr)
-            elif self._input_delimit == CLOSE:
-                self._input_body(instr)
-            elif self._input_delimit == CHUNKED:
-                if self._input_body_left > 0:
-                    if self._input_body_left < len(instr): # got more than the chunk
-                        this_chunk = self._input_body_left
-                        self._input_body(instr[:this_chunk])
-                        self._input_body_left = -1
-                        self._handle_input(instr[this_chunk+2:]) # +2 consumes the CRLF
-                    elif self._input_body_left == len(instr): # got the whole chunk exactly
-                        self._input_body(instr)
-                        self._input_body_left = -1
-                    else: # got partial chunk
-                        self._input_body(instr)
-                        self._input_body_left -= len(instr)
-                elif self._input_body_left == 0: # done
-                    if len(instr) >= 2 and instr[:2] == linesep:
-                        self._input_state = WAITING
-                        self._input_end()
-                        self._handle_input(instr[2:])
-                    elif hdr_end.search(instr):
-                        self._input_state = WAITING
-                        self._input_end()
-                        trailers, rest = hdr_end.split(instr, 1) # TODO: process trailers
-                        self._handle_input(rest)
-                    else:
-                        self._input_buffer = instr
-                else: # new chunk
-                    try:
-                        # they really need to use CRLF
-                        chunk_size, rest = instr.split(linesep, 1)
-                    except ValueError:
-                        # got a CRLF without anything behind it.. wait a bit
-                        if len(instr) > 256:
-                            # OK, this is absurd...
-                            self._input_error(ERR_CHUNK, instr)
-                        else:
-                            self._input_buffer += instr
-                        return
-                    if chunk_size.strip() == "": # ignore bare lines
-                        return self._handle_input(rest)
-                    if ";" in chunk_size: # ignore chunk extensions
-                        chunk_size = chunk_size.split(";", 1)[0]
-                    try:
-                        self._input_body_left = int(chunk_size, 16)
-                    except ValueError:
-                        self._input_error(ERR_CHUNK, chunk_size)
-                        return # blow up if we can't process a chunk.
-                    self._handle_input(rest)
-            elif self._input_delimit == COUNTED:
-                assert self._input_body_left >= 0, \
-                    "message counting problem (%s)" % self._input_body_left
-                # process body
-                if self._input_body_left <= len(instr): # got it all (and more?)
-                    self._input_body(instr[:self._input_body_left])
-                    self._input_state = WAITING
-                    if instr[self._input_body_left:]:
-                        # This will catch extra input that isn't on packet boundaries.
-                        self._input_error(ERR_EXTRA_DATA, instr[self._input_body_left:])
-                    else:
-                        self._input_end() 
-                else: # got some of it
-                    self._input_body(instr)
-                    self._input_body_left -= len(instr)
-            else:
+            try:
+                getattr(self, '_handle_%s' % self._input_delimit)(instr)
+            except AttributeError:
                 raise Exception, "Unknown input delimiter %s" % self._input_delimit
         else:
             raise Exception, "Unknown state %s" % self._input_state
+
+    def _handle_nobody(self, instr):
+        if instr:
+            self._input_error(ERR_BODY_FORBIDDEN, instr) # FIXME: will not work with pipelining
+        else:
+            self._input_end()
+        self._input_state = WAITING
+#               self._handle_input(instr)
+
+    def _handle_close(self, instr):
+        self._input_body(instr)
+
+    def _handle_chunked(self, instr):
+        if self._input_body_left > 0:
+            if self._input_body_left < len(instr): # got more than the chunk
+                this_chunk = self._input_body_left
+                self._input_body(instr[:this_chunk])
+                self._input_body_left = -1
+                self._handle_input(instr[this_chunk+2:]) # +2 consumes the CRLF
+            elif self._input_body_left == len(instr): # got the whole chunk exactly
+                self._input_body(instr)
+                self._input_body_left = -1
+            else: # got partial chunk
+                self._input_body(instr)
+                self._input_body_left -= len(instr)
+        elif self._input_body_left == 0: # done
+            if len(instr) >= 2 and instr[:2] == linesep:
+                self._input_state = WAITING
+                self._input_end()
+                self._handle_input(instr[2:])
+            elif hdr_end.search(instr):
+                self._input_state = WAITING
+                self._input_end()
+                trailers, rest = hdr_end.split(instr, 1) # TODO: process trailers
+                self._handle_input(rest)
+            else:
+                self._input_buffer = instr
+        else: # new chunk
+            try:
+                # they really need to use CRLF
+                chunk_size, rest = instr.split(linesep, 1)
+            except ValueError:
+                # got a CRLF without anything behind it.. wait a bit
+                if len(instr) > 256:
+                    # OK, this is absurd...
+                    self._input_error(ERR_CHUNK, instr)
+                else:
+                    self._input_buffer += instr
+                return
+            if chunk_size.strip() == "": # ignore bare lines
+                return self._handle_input(rest)
+            if ";" in chunk_size: # ignore chunk extensions
+                chunk_size = chunk_size.split(";", 1)[0]
+            try:
+                self._input_body_left = int(chunk_size, 16)
+            except ValueError:
+                self._input_error(ERR_CHUNK, chunk_size)
+                return # blow up if we can't process a chunk.
+            self._handle_input(rest)
+
+    def _handle_counted(self, instr):
+        assert self._input_body_left >= 0, \
+            "message counting problem (%s)" % self._input_body_left
+        # process body
+        if self._input_body_left <= len(instr): # got it all (and more?)
+            self._input_body(instr[:self._input_body_left])
+            self._input_state = WAITING
+            if instr[self._input_body_left:]:
+                # This will catch extra input that isn't on packet boundaries.
+                self._input_error(ERR_EXTRA_DATA, instr[self._input_body_left:])
+            else:
+                self._input_end()
+        else: # got some of it
+            self._input_body(instr)
+            self._input_body_left -= len(instr)
 
     def _parse_headers(self, instr):
         """
