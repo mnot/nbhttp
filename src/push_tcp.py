@@ -405,7 +405,10 @@ class _AsyncoreLoop:
                 for event in self.events:
                     when, what = event
                     if now >= when:
-                        self.events.remove(event)
+                        try:
+                            self.events.remove(event)
+                        except ValueError: # a previous event may have removed this one.
+                            continue
                         what()
                     else:
                         break
