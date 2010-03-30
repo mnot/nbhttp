@@ -297,38 +297,47 @@ class _TcpConnection(asyncore.dispatcher):
         else:
             raise
 
-class create_server(asyncore.dispatcher):
-    "An asynchrnous TCP server."
-    def __init__(self, host, port, conn_handler):
+def create_server(host, port, conn_handler):
+    """Listen to host:port and send connections to conn_handler."""
+    sock = server_listen(host, port)
+    attach_server(host, port, sock, conn_handler)
+
+def server_listen(host, port):
+    "Return a socket listening to host:port."
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setblocking(0)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, port))
+    sock.listen(socket.SOMAXCONN)
+    return sock
+    
+class attach_server(asyncore.dispatcher):
+    "Attach a server to a listening socket."
+    def __init__(self, host, port, sock, conn_handler):
         self.host = host
         self.port = port
         self.conn_handler = conn_handler
         if event:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.setblocking(0)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.bind((host, port))
-            sock.listen(socket.SOMAXCONN)
             event.event(self.handle_accept, handle=sock,
                         evtype=event.EV_READ|event.EV_PERSIST).add()
         else: # asyncore
-            asyncore.dispatcher.__init__(self)
-            self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.set_reuse_addr()
-            self.bind((host, port))
-            self.listen(socket.SOMAXCONN) # TODO: set SO_SNDBUF, SO_RCVBUF
+            asyncore.dispatcher.__init__(self, sock=sock)
+            self.accepting = True
 
     def handle_accept(self, *args):
-        if event:
-            conn, addr = args[1].accept()
-        else: # asyncore
-            conn, addr = self.accept()
+        try:
+            if event:
+                conn, addr = args[1].accept()
+            else: # asyncore
+                conn, addr = self.accept()
+        except TypeError: 
+            # sometimes accept() returns None if we have multiple processes listening
+            return
         tcp_conn = _TcpConnection(conn, self.host, self.port, self.handle_error)
         tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
 
     def handle_error(self):
-        raise AssertionError, "this should never happen for a server."
-
+        raise
 
 class create_client(asyncore.dispatcher):
     "An asynchronous TCP client."
