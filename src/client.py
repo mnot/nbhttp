@@ -172,7 +172,7 @@ class Client(HttpMessageHandler):
         # FIXME: self._handle_error(ERR_LEN_REQ)
         self._output_body(chunk)
         
-    def req_done(self, err):
+    def req_done(self, err=None):
         """
         Signal the end of the request, whether or not there was a body. MUST be
         called exactly once for each request. 

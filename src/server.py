@@ -157,7 +157,7 @@ class HttpServerConnection(HttpMessageHandler):
         "Send part of the response body. May be called zero to many times."
         self._output_body(chunk)
 
-    def res_done(self, err):
+    def res_done(self, err=None):
         """
         Signal the end of the response, whether or not there was a body. MUST be
         called exactly once for each response.
