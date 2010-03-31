@@ -362,3 +362,4 @@ class HttpMessageHandler:
             self._tcp_conn.close() # FIXME: abstract out?
         else:
             raise AssertionError, "Unknown request delimiter %s" % self._output_delimit
+        self._output_state = WAITING
