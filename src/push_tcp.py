@@ -177,6 +177,9 @@ class _TcpConnection(asyncore.dispatcher):
         else: # asyncore
             asyncore.dispatcher.__init__(self, sock)
 
+    def handle_connect(self): # asyncore
+        pass
+        
     def handle_read(self):
         """
         The connection has data read for reading; call read_cb
@@ -367,7 +370,8 @@ class create_client(asyncore.dispatcher):
             try:
                 self.connect((host, port))
             except socket.error, why:
-                self.handle_error(why[0])
+                if why[0] != errno.ECONNREFUSED: # FreeBSD will retry
+                    self.handle_error(why[0])
         if timeout:
             to_err = errno.ETIMEDOUT
             self._timeout_ev = schedule(timeout, self.handle_error, to_err)
@@ -380,7 +384,10 @@ class create_client(asyncore.dispatcher):
         tcp_conn = _TcpConnection(sock, self.host, self.port, self.handle_error)
         tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
 
-    def handle_write(self):
+    def handle_read(self): # asyncore
+        pass
+
+    def handle_write(self): # asyncore
         pass
 
     def handle_error(self, err=None):
