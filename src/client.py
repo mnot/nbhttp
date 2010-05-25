@@ -218,20 +218,16 @@ class Client(HttpMessageHandler):
             self._handle_input("")
         if self._input_delimit == CLOSE:
             self._input_end()
-        elif self._output_state == WAITING:
-            # nothing has happened yet. TODO: will get more complex with pipelining.
-            if self._retries < self.retry_limit:
-                self._retry()
+        elif self._input_state == WAITING:
+            if self.method in idempotent_methods:
+                if self._retries < self.retry_limit:
+                    self._retry()
+                else:
+                    self._handle_error(ERR_CONNECT, "Tried to connect %s times." % self._retries + 1)
             else:
-                self._handle_error(ERR_CONNECT, "Server closed the connection.")
-        elif self.method in idempotent_methods and \
-          self._retries < self.retry_limit and \
-          self._input_state == WAITING:
-            self._retry()
-        elif self._input_state == WAITING: # haven't completed headers yet
-            self._handle_error(ERR_CONNECT, "Server closed the connection.")
+                self._handle_error(ERR_CONNECT, "Can't retry %s method" % self.method)
         else:
-            self._input_error(ERR_CONNECT, "Server closed the connection.")
+            self._input_error(ERR_CONNECT, "Server dropped the connection before the whole response was received.")
 
     def _retry(self):
         "Retry the request."
