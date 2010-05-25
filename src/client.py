@@ -120,7 +120,7 @@ class Client(HttpMessageHandler):
         self._conn_reusable = False
         self._req_body_pause_cb = None
         self._retries = 0
-        self._timeout_ev = None
+        self._read_timeout_ev = None
         self._output_buffer = []
 
     def req_start(self, method, uri, req_hdrs, req_body_pause):
@@ -195,7 +195,7 @@ class Client(HttpMessageHandler):
         self._tcp_conn = tcp_conn
         self._output("") # kick the output buffer
         if self.read_timeout:
-            self._timeout_ev = push_tcp.schedule(
+            self._read_timeout_ev = push_tcp.schedule(
                 self.read_timeout, self._handle_error, ERR_READ_TIMEOUT, 'connect')
         return self._handle_input, self._conn_closed, self._req_body_pause
 
@@ -213,7 +213,7 @@ class Client(HttpMessageHandler):
     def _conn_closed(self):
         "The server closed the connection."
         if self.read_timeout:
-            self._timeout_ev.delete()
+            self._read_timeout_ev.delete()
         if self._input_buffer:
             self._handle_input("")
         if self._input_delimit == CLOSE:
@@ -235,8 +235,8 @@ class Client(HttpMessageHandler):
 
     def _retry(self):
         "Retry the request."
-        if self._timeout_ev:
-            self._timeout_ev.delete()
+        if self._read_timeout_ev:
+            self._read_timeout_ev.delete()
         self._retries += 1
         _idle_pool.attach(self._host, self._port, 
             self._handle_connect, self._handle_connect_error, self.connect_timeout)
@@ -254,7 +254,7 @@ class Client(HttpMessageHandler):
         and queue the request to be processed by the application.
         """
         if self.read_timeout:
-            self._timeout_ev.delete()
+            self._read_timeout_ev.delete()
         try: 
             res_version, status_txt = top_line.split(None, 1)
             res_version = float(res_version.rsplit('/', 1)[1])
@@ -272,7 +272,7 @@ class Client(HttpMessageHandler):
                 res_version > 1.0:
                 self._conn_reusable = True
         if self.read_timeout:
-            self._timeout_ev = push_tcp.schedule(
+            self._read_timeout_ev = push_tcp.schedule(
                  self.read_timeout, self._input_error, ERR_READ_TIMEOUT, 'start')
         self.res_body_cb, self.res_done_cb = self.res_start_cb(
             res_version, res_code, res_phrase, hdr_tuples, self.res_body_pause)
@@ -282,16 +282,16 @@ class Client(HttpMessageHandler):
     def _input_body(self, chunk):
         "Process a response body chunk from the wire."
         if self.read_timeout:
-            self._timeout_ev.delete()
+            self._read_timeout_ev.delete()
         self.res_body_cb(chunk)
         if self.read_timeout:
-            self._timeout_ev = push_tcp.schedule(
+            self._read_timeout_ev = push_tcp.schedule(
                  self.read_timeout, self._input_error, ERR_READ_TIMEOUT, 'body')
 
     def _input_end(self):
         "Indicate that the response body is complete."
         if self.read_timeout:
-            self._timeout_ev.delete()
+            self._read_timeout_ev.delete()
         if self._tcp_conn:
             if self._tcp_conn.tcp_connected and self._conn_reusable:
                 # Note that we don't reset read_cb; if more bytes come in before
@@ -305,7 +305,7 @@ class Client(HttpMessageHandler):
     def _input_error(self, err, detail=None):
         "Indicate a parsing problem with the response body."
         if self.read_timeout:
-            self._timeout_ev.delete()
+            self._read_timeout_ev.delete()
         if self._tcp_conn:
             self._tcp_conn.close()
             self._tcp_conn = None
@@ -323,8 +323,8 @@ class Client(HttpMessageHandler):
     def _handle_error(self, err, detail=None):
         "Handle a problem with the request by generating an appropriate response."
         assert self._input_state == WAITING
-        if self._timeout_ev:
-            self._timeout_ev.delete()
+        if self._read_timeout_ev:
+            self._read_timeout_ev.delete()
         if self._tcp_conn:
             self._tcp_conn.close()
             self._tcp_conn = None
