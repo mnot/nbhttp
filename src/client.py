@@ -223,7 +223,7 @@ class Client(HttpMessageHandler):
                 if self._retries < self.retry_limit:
                     self._retry()
                 else:
-                    self._handle_error(ERR_CONNECT, "Tried to connect %s times." % self._retries + 1)
+                    self._handle_error(ERR_CONNECT, "Tried to connect %s times." % (self._retries + 1))
             else:
                 self._handle_error(ERR_CONNECT, "Can't retry %s method" % self.method)
         else:
