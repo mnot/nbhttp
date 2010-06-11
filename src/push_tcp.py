@@ -368,6 +368,7 @@ class create_client(asyncore.dispatcher):
                 return
             if err != errno.EINPROGRESS: # FIXME: others?
                 self.connect_error_handler(err)
+                return
         else: # asyncore
             asyncore.dispatcher.__init__(self)
             self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
