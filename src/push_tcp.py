@@ -188,13 +188,13 @@ class _TcpConnection(asyncore.dispatcher):
         try:
             data = self.socket.recv(self.read_bufsize)
         except socket.error, why:
-            if why[0] in [errno.EBADF, errno.ECONNRESET, errno.EPIPE, errno.ETIMEDOUT]:
+            if why[0] in [errno.EBADF, errno.ECONNRESET, errno.ESHUTDOWN, errno.ECONNABORTED, errno.ENOTCONN]:
                 self.conn_closed()
                 return
-            elif why[0] in [errno.ECONNREFUSED, errno.ENETUNREACH] and self.connect_error_handler:
-                self.tcp_connected = False
-                self.connect_error_handler(why[0])
-                return
+#            elif why[0] in [errno.ECONNREFUSED, errno.ENETUNREACH] and self.connect_error_handler:
+#                self.tcp_connected = False
+#                self.connect_error_handler(why[0])
+#                return
             else:
                 raise
         if data == "":
@@ -212,14 +212,16 @@ class _TcpConnection(asyncore.dispatcher):
             try:
                 sent = self.socket.send(data)
             except socket.error, why:
-                if why[0] in [errno.EBADF, errno.ECONNRESET, errno.EPIPE, errno.ETIMEDOUT]:
+                if why[0] == errno.EWOULDBLOCK:
+                    return
+                elif why[0] in [errno.EBADF, errno.ECONNRESET, errno.ESHUTDOWN, errno.ECONNABORTED, errno.ENOTCONN]:
                     self.conn_closed()
                     return
-                elif why[0] in [errno.ECONNREFUSED, errno.ENETUNREACH] and \
-                  self.connect_error_handler:
-                    self.tcp_connected = False
-                    self.connect_error_handler(why[0])
-                    return
+#                elif why[0] in [errno.ECONNREFUSED, errno.ENETUNREACH] and \
+#                  self.connect_error_handler:
+#                    self.tcp_connected = False
+#                    self.connect_error_handler(why[0])
+#                    return
                 else:
                     raise
             if sent < len(data):
@@ -294,9 +296,11 @@ class _TcpConnection(asyncore.dispatcher):
 
     def handle_error(self):
         "asyncore-specific error method"
-        err = sys.exc_info()
-        if issubclass(err[0], socket.error):
-            self.connect_error_handler(err[0])
+        # TODO: should we check to make sure we're not getting duplicate connect-phase errors?
+        ex_type, ex_value = sys.exc_info()[:2]
+        if ex_type is socket.error:
+            if self.connect_error_handler:
+                self.connect_error_handler(ex_value[0])
         else:
             raise
 
@@ -336,7 +340,7 @@ class attach_server(asyncore.dispatcher):
         except TypeError: 
             # sometimes accept() returns None if we have multiple processes listening
             return
-        tcp_conn = _TcpConnection(conn, self.host, self.port, self.handle_error)
+        tcp_conn = _TcpConnection(conn, self.host, self.port)
         tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
 
     def handle_error(self):
@@ -344,7 +348,7 @@ class attach_server(asyncore.dispatcher):
 
 class create_client(asyncore.dispatcher):
     "An asynchronous TCP client."
-    def __init__(self, host, port, conn_handler, connect_error_handler, timeout=None):
+    def __init__(self, host, port, conn_handler, connect_error_handler, connect_timeout=None):
         self.host = host
         self.port = port
         self.conn_handler = conn_handler
@@ -360,28 +364,23 @@ class create_client(asyncore.dispatcher):
             try:
                 err = sock.connect_ex((host, port)) # FIXME: check for DNS errors, etc.
             except socket.error, why:
-                self.handle_error(why)
+                self.connect_error_handler(why[0])
                 return
             if err != errno.EINPROGRESS: # FIXME: others?
-                self.handle_error(err)
+                self.connect_error_handler(err)
         else: # asyncore
             asyncore.dispatcher.__init__(self)
             self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                self.connect((host, port))
-            except socket.error, why:
-                if why[0] != errno.ECONNREFUSED: # FreeBSD will retry
-                    self.handle_error(why[0])
-        if timeout:
-            to_err = errno.ETIMEDOUT
-            self._timeout_ev = schedule(timeout, self.handle_error, to_err)
+            self.connect((host, port)) # exceptions should be caught by handle_error
+        if connect_timeout:
+            self._timeout_ev = schedule(connect_timeout, self.connect_error_handler, errno.ETIMEDOUT)
 
     def handle_connect(self, sock=None):
         if self._timeout_ev:
             self._timeout_ev.delete()
         if sock is None: # asyncore
             sock = self.socket
-        tcp_conn = _TcpConnection(sock, self.host, self.port, self.handle_error)
+        tcp_conn = _TcpConnection(sock, self.host, self.port, self.connect_error_handler)
         tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
 
     def handle_read(self): # asyncore
@@ -390,14 +389,21 @@ class create_client(asyncore.dispatcher):
     def handle_write(self): # asyncore
         pass
 
-    def handle_error(self, err=None):
-        if self._timeout_ev:
-            self._timeout_ev.delete()
-        if not self._error_sent:
-            self._error_sent = True
-            if err == None:
-                t, err, tb = sys.exc_info()
-            self.connect_error_handler(self.host, self.port, err)
+    def handle_error(self):
+        ex_type, ex_value = sys.exc_info()[:2]
+        if ex_type is socket.error:
+            if ex_value[0] == errno.ECONNREFUSED:
+                return # FreeBSD will retry
+            if self._timeout_ev:
+                self._timeout_ev.delete()
+            if not self._error_sent:
+                self._error_sent = True
+            self.connect_error_handler(ex_value[0])
+        else:
+            if self._timeout_ev:
+                self._timeout_ev.delete()
+            raise
+                
 
 
 # adapted from Medusa
