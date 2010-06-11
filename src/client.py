@@ -85,6 +85,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+import errno
 import os
 from urlparse import urlsplit, urlunsplit
 
@@ -202,6 +203,8 @@ class Client(HttpMessageHandler):
 
     def _handle_connect_error(self, err):
         "The connection has failed. err is from errno."
+        if err == errno.EINVAL: # weirdness.
+            err = errno.ECONNREFUSED
         self._handle_error(ERR_CONNECT, os.strerror(err))
 
     def _conn_closed(self):
