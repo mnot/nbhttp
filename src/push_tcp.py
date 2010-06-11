@@ -417,17 +417,18 @@ class _AsyncoreLoop:
         self.timeout = 1
         self.granularity = 1
         self.socket_map = asyncore.socket_map
+        self._now = None
 
     def run(self):
         "Start the loop."
         last_event_check = 0
         while self.socket_map or self.events:
-            now = time.time()
-            if (now - last_event_check) >= self.granularity:
-                last_event_check = now
+            self._now = time.time()
+            if (self._now - last_event_check) >= self.granularity:
+                last_event_check = self._now
                 for event in self.events:
                     when, what = event
-                    if now >= when:
+                    if self._now >= when:
                         try:
                             self.events.remove(event)
                         except ValueError: # a previous event may have removed this one.
@@ -446,7 +447,12 @@ class _AsyncoreLoop:
         "Stop the loop."
         self.socket_map = {}
         self.events = []
+        self._now = None
             
+    def time(self):
+        "Return the current time (to avoid a system call)."
+        return self._now
+
     def schedule(self, delta, callback, *args):
         "Schedule callable callback to be run in delta seconds with *args."
         def cb():
@@ -471,8 +477,10 @@ if event:
     schedule = event.timeout
     run = event.dispatch
     stop =  event.abort
+    now = time.time
 else:
     _loop = _AsyncoreLoop()
     schedule = _loop.schedule
     run = _loop.run
     stop = _loop.stop
+    now = _loop.time
