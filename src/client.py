@@ -85,6 +85,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+import os
 from urlparse import urlsplit, urlunsplit
 
 import push_tcp
@@ -199,16 +200,9 @@ class Client(HttpMessageHandler):
                 self.read_timeout, self._handle_error, ERR_READ_TIMEOUT, 'connect')
         return self._handle_input, self._conn_closed, self._req_body_pause
 
-    def _handle_connect_error(self, host, port, err):
-        "The connection has failed."
-        import os, types, socket
-        if type(err) == types.IntType:
-            err = os.strerror(err)
-        elif isinstance(err, socket.error):
-            err = err[1]
-        else:
-            err = str(err)
-        self._handle_error(ERR_CONNECT, err)
+    def _handle_connect_error(self, err):
+        "The connection has failed. err is from errno."
+        self._handle_error(ERR_CONNECT, os.strerror(err))
 
     def _conn_closed(self):
         "The server closed the connection."
