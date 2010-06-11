@@ -451,14 +451,14 @@ class _AsyncoreLoop:
             
     def time(self):
         "Return the current time (to avoid a system call)."
-        return self._now
+        return self._now or time.time()
 
     def schedule(self, delta, callback, *args):
         "Schedule callable callback to be run in delta seconds with *args."
         def cb():
             if callback:
                 callback(*args)
-        new_event = (time.time() + delta, cb)
+        new_event = (self.time() + delta, cb)
         events = self.events
         bisect.insort(events, new_event)
         class event_holder:
