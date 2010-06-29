@@ -188,13 +188,11 @@ class _TcpConnection(asyncore.dispatcher):
         try:
             data = self.socket.recv(self.read_bufsize)
         except socket.error, why:
-            if why[0] in [errno.EBADF, errno.ECONNRESET, errno.ESHUTDOWN, errno.ECONNABORTED, errno.ENOTCONN]:
+            if why[0] in [errno.EBADF, errno.ECONNRESET, errno.ESHUTDOWN, 
+                          errno.ECONNABORTED, errno.ECONNREFUSED, errno.ENOTCONN, 
+                          errno.EPIPE]:
                 self.conn_closed()
                 return
-#            elif why[0] in [errno.ECONNREFUSED, errno.ENETUNREACH] and self.connect_error_handler:
-#                self.tcp_connected = False
-#                self.connect_error_handler(why[0])
-#                return
             else:
                 raise
         if data == "":
@@ -214,14 +212,11 @@ class _TcpConnection(asyncore.dispatcher):
             except socket.error, why:
                 if why[0] == errno.EWOULDBLOCK:
                     return
-                elif why[0] in [errno.EBADF, errno.ECONNRESET, errno.ESHUTDOWN, errno.ECONNABORTED, errno.ENOTCONN]:
+                elif why[0] in [errno.EBADF, errno.ECONNRESET, errno.ESHUTDOWN, 
+                                errno.ECONNABORTED, errno.ECONNREFUSED, errno.ENOTCONN, 
+                                errno.EPIPE]:
                     self.conn_closed()
                     return
-#                elif why[0] in [errno.ECONNREFUSED, errno.ENETUNREACH] and \
-#                  self.connect_error_handler:
-#                    self.tcp_connected = False
-#                    self.connect_error_handler(why[0])
-#                    return
                 else:
                     raise
             if sent < len(data):
@@ -300,7 +295,7 @@ class _TcpConnection(asyncore.dispatcher):
         ex_type, ex_value = sys.exc_info()[:2]
         if ex_type is socket.error:
             if self.connect_error_handler:
-                self.connect_error_handler(ex_value[0])
+                self.connect_error_handler(ex_value)
         else:
             raise
 
@@ -364,15 +359,28 @@ class create_client(asyncore.dispatcher):
             try:
                 err = sock.connect_ex((host, port)) # FIXME: check for DNS errors, etc.
             except socket.error, why:
-                self.connect_error_handler(why[0])
+                if why[0] == errno.ECONNREFUSED:
+                    pass # FreeBSD will retry
+                else:
+                    self.connect_error_handler(sys.exc_info()[1])
+                    return
+            except socket.gaierror, why:
+                self.connect_error_handler(sys.exc_info()[1])
                 return
             if err != errno.EINPROGRESS: # FIXME: others?
-                self.connect_error_handler(err)
+                self.connect_error_handler((err, os.strerror(err)))
                 return
         else: # asyncore
             asyncore.dispatcher.__init__(self)
             self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.connect((host, port)) # exceptions should be caught by handle_error
+            try:
+                self.connect((host, port)) # exceptions should be caught by handle_error
+            except socket.error, why:
+                if why[0] == errno.ECONNREFUSED:
+                    pass # FreeBSD will retry
+                else:
+                    self.connect_error_handler(sys.exc_info()[1])
+                    pass
         if connect_timeout:
             self._timeout_ev = schedule(connect_timeout, self.connect_error_handler, errno.ETIMEDOUT)
 
@@ -399,7 +407,7 @@ class create_client(asyncore.dispatcher):
                 self._timeout_ev.delete()
             if not self._error_sent:
                 self._error_sent = True
-            self.connect_error_handler(ex_value[0])
+            self.connect_error_handler(ex_value)
         else:
             if self._timeout_ev:
                 self._timeout_ev.delete()

@@ -202,10 +202,10 @@ class Client(HttpMessageHandler):
         return self._handle_input, self._conn_closed, self._req_body_pause
 
     def _handle_connect_error(self, err):
-        "The connection has failed. err is from errno."
-        if err == errno.EINVAL: # weirdness.
-            err = errno.ECONNREFUSED
-        self._handle_error(ERR_CONNECT, os.strerror(err))
+        "The connection has failed."
+        if err[0] == errno.EINVAL: # weirdness.
+            err = (errno.ECONNREFUSED, os.strerror(errno.ECONNREFUSED))
+        self._handle_error(ERR_CONNECT, err[1])
 
     def _conn_closed(self):
         "The server closed the connection."
