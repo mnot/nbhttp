@@ -142,12 +142,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+import asyncore
+import bisect
+import errno
+import os
 import sys
 import socket
-import errno
-import asyncore
 import time
-import bisect
 
 try:
     import event      # http://www.monkey.org/~dugsong/pyevent/
@@ -382,7 +383,8 @@ class create_client(asyncore.dispatcher):
                     self.connect_error_handler(sys.exc_info()[1])
                     pass
         if connect_timeout:
-            self._timeout_ev = schedule(connect_timeout, self.connect_error_handler, errno.ETIMEDOUT)
+            self._timeout_ev = schedule(connect_timeout, self.connect_error_handler, 
+                                        (errno.ETIMEDOUT, os.strerror(errno.ETIMEDOUT)))
 
     def handle_connect(self, sock=None):
         if self._timeout_ev:
