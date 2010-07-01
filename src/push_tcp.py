@@ -159,11 +159,11 @@ class _TcpConnection(asyncore.dispatcher):
     "Base class for a TCP connection."
     write_bufsize = 16
     read_bufsize = 1024 * 16
-    def __init__(self, sock, host, port, connect_error_handler=None):
+    def __init__(self, sock, host, port, conn_err=None):
         self.socket = sock
         self.host = host
         self.port = port
-        self.connect_error_handler = connect_error_handler
+        self.conn_err = conn_err
         self.read_cb = None
         self.close_cb = None
         self._close_cb_called = False
@@ -292,13 +292,9 @@ class _TcpConnection(asyncore.dispatcher):
 
     def handle_error(self):
         "asyncore-specific error method"
-        # TODO: should we check to make sure we're not getting duplicate connect-phase errors?
-        ex_type, ex_value = sys.exc_info()[:2]
-        if ex_type is socket.error:
-            if self.connect_error_handler:
-                self.connect_error_handler(ex_value)
-        else:
-            raise
+        if self.conn_err:
+            self.conn_err()
+
 
 def create_server(host, port, conn_handler):
     """Listen to host:port and send connections to conn_handler."""
@@ -350,7 +346,6 @@ class create_client(asyncore.dispatcher):
         self.conn_handler = conn_handler
         self.connect_error_handler = connect_error_handler
         self._timeout_ev = None
-        self._conn_handled = False
         self._error_sent = False
         # TODO: socket.getaddrinfo(); needs to be non-blocking.
         if event:
@@ -360,16 +355,13 @@ class create_client(asyncore.dispatcher):
             try:
                 err = sock.connect_ex((host, port)) # FIXME: check for DNS errors, etc.
             except socket.error, why:
-                if why[0] == errno.ECONNREFUSED:
-                    pass # FreeBSD will retry
-                else:
-                    self.connect_error_handler(sys.exc_info()[1])
-                    return
+                self.handle_error()
+                return
             except socket.gaierror, why:
-                self.connect_error_handler(sys.exc_info()[1])
+                self.handle_error()
                 return
             if err != errno.EINPROGRESS: # FIXME: others?
-                self.connect_error_handler((err, os.strerror(err)))
+                self.handle_error((err, os.strerror(err)))
                 return
         else: # asyncore
             asyncore.dispatcher.__init__(self)
@@ -377,11 +369,11 @@ class create_client(asyncore.dispatcher):
             try:
                 self.connect((host, port)) # exceptions should be caught by handle_error
             except socket.error, why:
-                if why[0] == errno.ECONNREFUSED:
-                    pass # FreeBSD will retry
-                else:
-                    self.connect_error_handler(sys.exc_info()[1])
-                    pass
+                self.handle_error()
+                return
+            except socket.gaierror, why:
+                self.handle_error()
+                return
         if connect_timeout:
             self._timeout_ev = schedule(connect_timeout, self.connect_error_handler, 
                                         (errno.ETIMEDOUT, os.strerror(errno.ETIMEDOUT)))
@@ -389,9 +381,11 @@ class create_client(asyncore.dispatcher):
     def handle_connect(self, sock=None):
         if self._timeout_ev:
             self._timeout_ev.delete()
+        if self._error_sent:
+            return
         if sock is None: # asyncore
             sock = self.socket
-        tcp_conn = _TcpConnection(sock, self.host, self.port, self.connect_error_handler)
+        tcp_conn = _TcpConnection(sock, self.host, self.port, self.handle_error)
         tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
 
     def handle_read(self): # asyncore
@@ -400,21 +394,25 @@ class create_client(asyncore.dispatcher):
     def handle_write(self): # asyncore
         pass
 
-    def handle_error(self):
-        ex_type, ex_value = sys.exc_info()[:2]
-        if ex_type is socket.error:
+    def handle_error(self, ex_value=None):
+        if ex_value is None:
+            ex_type, ex_value = sys.exc_info()[:2]
+        else:
+            ex_type = socket.error
+        if ex_type in [socket.error, socket.gaierror]:
             if ex_value[0] == errno.ECONNREFUSED:
-                return # FreeBSD will retry
+                return # OS will retry
             if self._timeout_ev:
                 self._timeout_ev.delete()
-            if not self._error_sent:
+            if self._error_sent:
+                return
+            elif self.connect_error_handler:
                 self._error_sent = True
-            self.connect_error_handler(ex_value)
+                self.connect_error_handler(ex_value)
         else:
             if self._timeout_ev:
                 self._timeout_ev.delete()
             raise
-                
 
 
 # adapted from Medusa
