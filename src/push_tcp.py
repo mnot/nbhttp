@@ -315,7 +315,7 @@ class _TcpConnection(asyncore.dispatcher):
 
     def handle_error(self):
         "asyncore-specific misc error method. We die in flames."
-        asyncore.dispatcher.close(self)
+        stop() # FIXME: handle unscheduled errors more gracefully
         raise
         
 
@@ -359,6 +359,7 @@ class attach_server(asyncore.dispatcher):
         tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
 
     def handle_error(self):
+        stop() # FIXME: handle unscheduled errors more gracefully
         raise
 
 class create_client(asyncore.dispatcher):
@@ -438,6 +439,7 @@ class create_client(asyncore.dispatcher):
             raise
     
     def handle_error(self):
+        stop() # FIXME: handle unscheduled errors more gracefully
         raise
 
 
