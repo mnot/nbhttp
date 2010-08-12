@@ -159,11 +159,10 @@ class _TcpConnection(asyncore.dispatcher):
     "Base class for a TCP connection."
     write_bufsize = 16
     read_bufsize = 1024 * 16
-    def __init__(self, sock, host, port, conn_err=None):
+    def __init__(self, sock, host, port):
         self.socket = sock
         self.host = host
         self.port = port
-        self.conn_err = conn_err
         self.read_cb = None
         self.close_cb = None
         self._close_cb_called = False
@@ -378,13 +377,13 @@ class create_client(asyncore.dispatcher):
             try:
                 err = sock.connect_ex((host, port)) # FIXME: check for DNS errors, etc.
             except socket.error, why:
-                self.handle_error()
+                self.handle_conn_error()
                 return
             except socket.gaierror, why:
-                self.handle_error()
+                self.handle_conn_error()
                 return
             if err != errno.EINPROGRESS: # FIXME: others?
-                self.handle_error((err, os.strerror(err)))
+                self.handle_conn_error((err, os.strerror(err)))
                 return
         else: # asyncore
             asyncore.dispatcher.__init__(self)
@@ -392,10 +391,10 @@ class create_client(asyncore.dispatcher):
             try:
                 self.connect((host, port)) # exceptions should be caught by handle_error
             except socket.error, why:
-                self.handle_error()
+                self.handle_conn_error()
                 return
             except socket.gaierror, why:
-                self.handle_error()
+                self.handle_conn_error()
                 return
         if connect_timeout:
             self._timeout_ev = schedule(connect_timeout, self.connect_error_handler, 
@@ -408,7 +407,7 @@ class create_client(asyncore.dispatcher):
             return
         if sock is None: # asyncore
             sock = self.socket
-        tcp_conn = _TcpConnection(sock, self.host, self.port, self.handle_error)
+        tcp_conn = _TcpConnection(sock, self.host, self.port, self.handle_conn_error)
         tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
 
     def handle_read(self): # asyncore
@@ -417,7 +416,7 @@ class create_client(asyncore.dispatcher):
     def handle_write(self): # asyncore
         pass
 
-    def handle_error(self, ex_value=None):
+    def handle_conn_error(self, ex_value=None):
         if ex_value is None:
             ex_type, ex_value = sys.exc_info()[:2]
         else:
