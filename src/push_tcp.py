@@ -315,6 +315,7 @@ class _TcpConnection(asyncore.dispatcher):
 
     def handle_error(self):
         "asyncore-specific misc error method. We die in flames."
+        asyncore.dispatcher.close(self)
         raise
         
 
