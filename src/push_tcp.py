@@ -315,11 +315,9 @@ class _TcpConnection(asyncore.dispatcher):
         return self.tcp_connected and (len(self._write_buffer) > 0 or self._closing)
 
     def handle_error(self):
-        "asyncore-specific error method"
-        if self.conn_err:
-            self.conn_err()
-            self.close()
-
+        "asyncore-specific misc error method. We die in flames."
+        raise
+        
 
 def create_server(host, port, conn_handler):
     """Listen to host:port and send connections to conn_handler."""
