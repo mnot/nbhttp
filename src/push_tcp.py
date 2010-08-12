@@ -287,7 +287,7 @@ class _TcpConnection(asyncore.dispatcher):
                     self._wevent.delete()
                 self.socket.close()
             else:
-                self.close()
+                asyncore.dispatcher.close(self)
 
     def readable(self):
         "asyncore-specific readable method"
