@@ -407,7 +407,7 @@ class create_client(asyncore.dispatcher):
             return
         if sock is None: # asyncore
             sock = self.socket
-        tcp_conn = _TcpConnection(sock, self.host, self.port, self.handle_conn_error)
+        tcp_conn = _TcpConnection(sock, self.host, self.port)
         tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
 
     def handle_read(self): # asyncore
