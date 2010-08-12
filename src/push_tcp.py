@@ -454,11 +454,13 @@ class _AsyncoreLoop:
         self.granularity = 1
         self.socket_map = asyncore.socket_map
         self._now = None
+        self._running = False
 
     def run(self):
         "Start the loop."
         last_event_check = 0
-        while self.socket_map or self.events:
+        self._running = True
+        while (self.socket_map or self.events) and self._running:
             self._now = time.time()
             if (self._now - last_event_check) >= self.granularity:
                 last_event_check = self._now
@@ -477,13 +479,14 @@ class _AsyncoreLoop:
             self.num_channels = n
             if n > self.max_channels:
                 self.max_channels = n
-            asyncore.poll(self.timeout)
+            asyncore.poll(self.timeout) # TODO: use poll2 when available
             
     def stop(self):
         "Stop the loop."
         self.socket_map.clear()
         self.events = []
         self._now = None
+        self._running = False
             
     def time(self):
         "Return the current time (to avoid a system call)."
