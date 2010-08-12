@@ -279,8 +279,15 @@ class _TcpConnection(asyncore.dispatcher):
         if len(self._write_buffer) > 0:
             self._closing = True
         else:
-            self.socket.close()
             self.tcp_connected = False
+            if event:
+                if self._revent.pending():
+                    self._revent.delete()
+                if self._wevent.pending():
+                    self._wevent.delete()
+                self.socket.close()
+            else:
+                self.close()
 
     def readable(self):
         "asyncore-specific readable method"
@@ -294,6 +301,7 @@ class _TcpConnection(asyncore.dispatcher):
         "asyncore-specific error method"
         if self.conn_err:
             self.conn_err()
+            self.close()
 
 
 def create_server(host, port, conn_handler):
