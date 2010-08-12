@@ -435,6 +435,9 @@ class create_client(asyncore.dispatcher):
             if self._timeout_ev:
                 self._timeout_ev.delete()
             raise
+    
+    def handle_error(self):
+        raise
 
 
 # adapted from Medusa
