@@ -481,7 +481,7 @@ class _AsyncoreLoop:
             
     def stop(self):
         "Stop the loop."
-        self.socket_map = {}
+        self.socket_map.clear()
         self.events = []
         self._now = None
             
