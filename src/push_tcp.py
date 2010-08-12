@@ -178,6 +178,23 @@ class _TcpConnection(asyncore.dispatcher):
         else: # asyncore
             asyncore.dispatcher.__init__(self, sock)
 
+    def __repr__(self):
+        status = [self.__class__.__module__+"."+self.__class__.__name__]
+        if self.tcp_connected:
+            status.append('connected')
+        status.append('%s:%s' % (self.host, self.port))
+        if event:
+            status.append('event-based')
+        if self._paused:
+            status.append('paused')
+        if self._closing:
+            status.append('closing')
+        if self._close_cb_called:
+            status.append('close cb called')
+        if self._write_buffer:
+            status.append('%s write buffered' % len(self._write_buffer))
+        return "<%s at %#x>" % (", ".join(status), id(self))
+
     def handle_connect(self): # asyncore
         pass
         
