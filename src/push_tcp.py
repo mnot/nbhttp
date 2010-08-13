@@ -314,10 +314,9 @@ class _TcpConnection(asyncore.dispatcher):
         return self.tcp_connected and (len(self._write_buffer) > 0 or self._closing)
 
     def handle_error(self):
-        "asyncore-specific misc error method. We die in flames."
-        stop() # FIXME: handle unscheduled errors more gracefully
-        raise
-        
+        "asyncore-specific misc error method. We treat it as if the connection was closed."
+        self.conn_closed()
+
 
 def create_server(host, port, conn_handler):
     """Listen to host:port and send connections to conn_handler."""
