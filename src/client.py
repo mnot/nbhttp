@@ -125,6 +125,11 @@ class Client(HttpMessageHandler):
         self._read_timeout_ev = None
         self._output_buffer = []
 
+    def __getstate__(self):
+        props = ['method', 'uri', 'req_hdrs', 
+            'input_header_length', 'input_transfer_length']
+        return dict([(k,v) for (k,v) in self.__dict__.items() if k in props])
+
     def req_start(self, method, uri, req_hdrs, req_body_pause):
         """
         Start a request to uri using method, where 
