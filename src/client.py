@@ -380,16 +380,20 @@ _idle_pool = _HttpConnectionPool()
 
 def test_client(request_uri):
     "A simple demonstration of a client."
+    import sys
+
     def printer(version, status, phrase, headers, res_pause):
         "Print the response headers."
         print "HTTP/%s" % version, status, phrase
         print "\n".join(["%s:%s" % header for header in headers])
         print
         def body(chunk):
-            print chunk
+            sys.stdout.write(chunk)
         def done(err):
             if err:
-                print "*** ERROR: %s (%s)" % (err['desc'], err['detail'])
+                sys.stderr.write("\n*** ERROR: %s (%s)\n" % 
+                    (err['desc'], err['detail'])
+                )
             push_tcp.stop()
         return body, done
     c = Client(printer)
