@@ -49,7 +49,8 @@ hop_by_hop_hdrs = ['connection', 'keep-alive', 'proxy-authenticate',
                    'upgrade', 'proxy-connection']
 
 
-from error import ERR_EXTRA_DATA, ERR_CHUNK, ERR_BODY_FORBIDDEN
+from error import ERR_EXTRA_DATA, ERR_CHUNK, ERR_BODY_FORBIDDEN, \
+    ERR_TOO_MANY_MSGS
 
 def dummy(*args, **kw):
     "Dummy method that does nothing; useful to ignore a callback."
@@ -142,7 +143,10 @@ class HttpMessageHandler:
         if self._input_state == WAITING:
             if hdr_end.search(instr): # found one
                 rest = self._parse_headers(instr)
-                self._handle_input(rest)
+                try:
+                    self._handle_input(rest)
+                except RuntimeError:
+                    self._input_error(ERR_TOO_MANY_MSGS)
             else: # partial headers; store it and wait for more
                 self._input_buffer = instr
         elif self._input_state == HEADERS_DONE:

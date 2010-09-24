@@ -58,6 +58,11 @@ ERR_WHITESPACE_HDR = {
     'status': ("400", "Bad Request"),
 }
 
+ERR_TOO_MANY_MSGS = {
+    'desc': "Too many messages to parse",
+    'status': ("400", "Bad Request"),
+}
+
 # client-specific errors
 
 ERR_URL = {
