@@ -3,18 +3,19 @@
 """
 Non-Blocking HTTP Server
 
-This library allow implementation of an HTTP/1.1 server that is "non-blocking,"
-"asynchronous" and "event-driven" -- i.e., it achieves very high performance
-and concurrency, so long as the application code does not block (e.g.,
-upon network, disk or database access). Blocking on one request will block
-the entire server.
+This library allow implementation of an HTTP/1.1 server that is
+"non-blocking," "asynchronous" and "event-driven" -- i.e., it achieves very
+high performance and concurrency, so long as the application code does not
+block (e.g., upon network, disk or database access). Blocking on one request
+will block the entire server.
 
 Instantiate a Server with the following parameters:
   - host (string)
   - port (int)
   - req_start (callable)
   
-req_start is called when a request starts. It must take the following arguments:
+req_start is called when a request starts. It must take the following
+arguments:
   - method (string)
   - uri (string)
   - req_hdrs (list of (name, value) tuples)
@@ -24,8 +25,8 @@ and return:
   - req_body (callable)
   - req_done (callable)
     
-req_body is called when part of the request body is available. It must take the 
-following argument:
+req_body is called when part of the request body is available. It must take
+the following argument:
   - chunk (string)
 
 req_done is called when the request is complete, whether or not it contains a 
@@ -56,10 +57,10 @@ following argument if appropriate:
     
 See the error module for the complete list of valid error dictionaries.
 
-Where possible, errors in the request will be responded to with the appropriate
-4xx HTTP status code. However, if a response has already been started, the
-connection will be dropped (for example, when the request chunking or
-indicated length are incorrect).
+Where possible, errors in the request will be responded to with the
+appropriate 4xx HTTP status code. However, if a response has already been
+started, the connection will be dropped (for example, when the request
+chunking or indicated length are incorrect).
 """
 
 __author__ = "Mark Nottingham <mnot@mnot.net>"
@@ -92,24 +93,26 @@ import logging
 import push_tcp
 from http_common import HttpMessageHandler, \
     CLOSE, COUNTED, CHUNKED, \
-    WAITING, HEADERS_DONE, \
+    WAITING, \
     hop_by_hop_hdrs, \
     dummy, get_hdr
 
-from error import ERR_HTTP_VERSION, ERR_HOST_REQ, ERR_WHITESPACE_HDR, ERR_TRANSFER_CODE
+from error import ERR_HTTP_VERSION, ERR_HOST_REQ, \
+    ERR_WHITESPACE_HDR, ERR_TRANSFER_CODE
 
 logging.basicConfig()
 log = logging.getLogger('server')
 log.setLevel(logging.WARNING)
 
-# FIXME: assure that the connection isn't closed before reading the entire req body
+# FIXME: assure that the connection isn't closed before reading the entire 
+#        req body
 # TODO: filter out 100 responses to HTTP/1.0 clients that didn't ask for it.
 
 class Server:
     "An asynchronous HTTP server."
     def __init__(self, host, port, request_handler):
         self.request_handler = request_handler
-        self.server = push_tcp.create_server(host, port, self.handle_connection)
+        push_tcp.create_server(host, port, self.handle_connection)
         
     def handle_connection(self, tcp_conn):
         "Process a new push_tcp connection, tcp_conn."
@@ -150,7 +153,9 @@ class HttpServerConnection(HttpMessageHandler):
             delimit = CLOSE
             res_hdrs.append(("Connection", "close"))
 
-        self._output_start("HTTP/1.1 %s %s" % (status_code, status_phrase), res_hdrs, delimit)
+        self._output_start("HTTP/1.1 %s %s" % (status_code, status_phrase),
+            res_hdrs, delimit
+        )
         return self.res_body, self.res_done
 
     def res_body(self, chunk):
@@ -159,9 +164,9 @@ class HttpServerConnection(HttpMessageHandler):
 
     def res_done(self, err=None):
         """
-        Signal the end of the response, whether or not there was a body. MUST be
-        called exactly once for each response.
-
+        Signal the end of the response, whether or not there was a body. MUST
+        be called exactly once for each response.
+        
         If err is not None, it is an error dictionary (see the error module)
         indicating that an HTTP-specific (i.e., non-application) error occured
         in the generation of the response; this is useful for debugging.
@@ -169,7 +174,10 @@ class HttpServerConnection(HttpMessageHandler):
         self._output_end(err)
 
     def req_body_pause(self, paused):
-        "Indicate that the server should pause (True) or unpause (False) the request."
+        """
+        Indicate that the server should pause (True) or unpause (False) the
+        request.
+        """
         if self._tcp_conn and self._tcp_conn.tcp_connected:
             self._tcp_conn.pause(paused)
 
@@ -194,34 +202,42 @@ class HttpServerConnection(HttpMessageHandler):
     def _output(self, chunk):
         self._tcp_conn.write(chunk)
 
-    def _input_start(self, top_line, hdr_tuples, conn_tokens, transfer_codes, content_length):
+    def _input_start(self, top_line, hdr_tuples, conn_tokens, 
+        transfer_codes, content_length):
         """
         Take the top set of headers from the input stream, parse them
         and queue the request to be processed by the application.
         """
-        assert self._input_state == WAITING, "pipelining not supported" # FIXME: pipelining
+        assert self._input_state == WAITING, "pipelining not supported" 
+        # FIXME: pipelining
         try: 
             method, _req_line = top_line.split(None, 1)
             uri, req_version = _req_line.rsplit(None, 1)
             self.req_version = float(req_version.rsplit('/', 1)[1])
         except (ValueError, IndexError):
-            self._handle_error(ERR_HTTP_VERSION, top_line) # FIXME: more fine-grained
+            self._handle_error(ERR_HTTP_VERSION, top_line) 
+            # FIXME: more fine-grained
             raise ValueError
-        if self.req_version == 1.1 and 'host' not in [t[0].lower() for t in hdr_tuples]:
+        if self.req_version == 1.1 \
+        and 'host' not in [t[0].lower() for t in hdr_tuples]:
             self._handle_error(ERR_HOST_REQ)
             raise ValueError
         if hdr_tuples[:1][:1][:1] in [" ", "\t"]:
             self._handle_error(ERR_WHITESPACE_HDR)
-        for code in transfer_codes: # we only support 'identity' and chunked' codes
+        for code in transfer_codes: 
+            # we only support 'identity' and chunked' codes
             if code not in ['identity', 'chunked']: 
                 # FIXME: SHOULD also close connection
                 self._handle_error(ERR_TRANSFER_CODE)
                 raise ValueError
-        # FIXME: MUST 400 request messages with whitespace between name and colon
+        # FIXME: MUST 400 request messages with whitespace between 
+        #        name and colon
         self.method = method
         self.connection_hdr = conn_tokens
 
-        log.info("%s server req_start %s %s %s" % (id(self), method, uri, self.req_version))
+        log.info("%s server req_start %s %s %s" % (
+            id(self), method, uri, self.req_version)
+        )
         self.req_body_cb, self.req_done_cb = self.request_handler(
                 method, uri, hdr_tuples, self.res_start, self.req_body_pause)
         allows_body = (content_length) or (transfer_codes != [])
@@ -244,8 +260,11 @@ class HttpServerConnection(HttpMessageHandler):
         self.req_done_cb(err)
 
     def _handle_error(self, err, detail=None):
-        "Handle a problem with the request by generating an appropriate response."
-#        self._queue.append(ErrorHandler(status_code, status_phrase, body, self))
+        """
+        Handle a problem with the request by generating an appropriate
+        response.
+        """
+#   self._queue.append(ErrorHandler(status_code, status_phrase, body, self))
         assert self._output_state == WAITING
         if detail:
             err['detail'] = detail
