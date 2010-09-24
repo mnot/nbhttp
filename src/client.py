@@ -92,10 +92,10 @@ from urlparse import urlsplit, urlunsplit
 import push_tcp
 from http_common import HttpMessageHandler, \
     CLOSE, COUNTED, NOBODY, \
-    WAITING, HEADERS_DONE, \
+    WAITING, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
     dummy, get_hdr
-from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ, \
+from error import ERR_URL, ERR_CONNECT, \
     ERR_READ_TIMEOUT, ERR_HTTP_VERSION
 
 req_remove_hdrs = hop_by_hop_hdrs + ['host']
@@ -129,7 +129,8 @@ class Client(HttpMessageHandler):
     def __getstate__(self):
         props = ['method', 'uri', 'req_hdrs', 
             'input_header_length', 'input_transfer_length']
-        return dict([(k,v) for (k,v) in self.__dict__.items() if k in props])
+        return dict([(k, v) for (k, v) in self.__dict__.items() 
+                     if k in props])
 
     def req_start(self, method, uri, req_hdrs, req_body_pause):
         """
@@ -408,9 +409,8 @@ class _HttpConnectionPool:
 _idle_pool = _HttpConnectionPool()
 
 
-def test_client(request_uri):
+def test_client(request_uri, out, err):
     "A simple demonstration of a client."
-    import sys
 
     def printer(version, status, phrase, headers, res_pause):
         "Print the response headers."
@@ -418,11 +418,11 @@ def test_client(request_uri):
         print "\n".join(["%s:%s" % header for header in headers])
         print
         def body(chunk):
-            sys.stdout.write(chunk)
-        def done(err):
-            if err:
-                sys.stderr.write("\n*** ERROR: %s (%s)\n" % 
-                    (err['desc'], err['detail'])
+            out(chunk)
+        def done(err_msg):
+            if err_msg:
+                err("\n*** ERROR: %s (%s)\n" % 
+                    (err_msg['desc'], err_msg['detail'])
                 )
             push_tcp.stop()
         return body, done
@@ -433,4 +433,4 @@ def test_client(request_uri):
             
 if __name__ == "__main__":
     import sys
-    test_client(sys.argv[1])
+    test_client(sys.argv[1], sys.stdout.write, sys.stderr.write)
