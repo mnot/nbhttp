@@ -167,7 +167,7 @@ class _TcpConnection(asyncore.dispatcher):
         self.close_cb = None
         self._close_cb_called = False
         self.pause_cb = None  
-        self.tcp_connected = True # always handed a connected socket (we assume)
+        self.tcp_connected = True # we assume a connected socket
         self._paused = False # TODO: should be paused by default
         self._closing = False
         self._write_buffer = []
@@ -206,8 +206,8 @@ class _TcpConnection(asyncore.dispatcher):
             data = self.socket.recv(self.read_bufsize)
         except socket.error, why:
             if why[0] in [errno.EBADF, errno.ECONNRESET, errno.ESHUTDOWN, 
-                          errno.ECONNABORTED, errno.ECONNREFUSED, errno.ENOTCONN, 
-                          errno.EPIPE]:
+                          errno.ECONNABORTED, errno.ECONNREFUSED, 
+                          errno.ENOTCONN, errno.EPIPE]:
                 self.conn_closed()
                 return
             else:
@@ -229,8 +229,9 @@ class _TcpConnection(asyncore.dispatcher):
             except socket.error, why:
                 if why[0] == errno.EWOULDBLOCK:
                     return
-                elif why[0] in [errno.EBADF, errno.ECONNRESET, errno.ESHUTDOWN, 
-                                errno.ECONNABORTED, errno.ECONNREFUSED, errno.ENOTCONN, 
+                elif why[0] in [errno.EBADF, errno.ECONNRESET, 
+                                errno.ESHUTDOWN, errno.ECONNABORTED,
+                                errno.ECONNREFUSED, errno.ENOTCONN, 
                                 errno.EPIPE]:
                     self.conn_closed()
                     return
@@ -245,7 +246,8 @@ class _TcpConnection(asyncore.dispatcher):
         if self._closing:
             self.close()
         if event:
-            if self.tcp_connected and (len(self._write_buffer) > 0 or self._closing):
+            if self.tcp_connected \
+            and (len(self._write_buffer) > 0 or self._closing):
                 return self._wevent
 
     def conn_closed(self):
@@ -311,10 +313,14 @@ class _TcpConnection(asyncore.dispatcher):
     
     def writable(self):
         "asyncore-specific writable method"
-        return self.tcp_connected and (len(self._write_buffer) > 0 or self._closing)
+        return self.tcp_connected and \
+            (len(self._write_buffer) > 0 or self._closing)
 
     def handle_error(self):
-        "asyncore-specific misc error method. We treat it as if the connection was closed."
+        """
+        asyncore-specific misc error method. We treat it as if 
+        the connection was closed.
+        """
         self.conn_closed()
 
 
@@ -352,10 +358,12 @@ class attach_server(asyncore.dispatcher):
             else: # asyncore
                 conn, addr = self.accept()
         except TypeError: 
-            # sometimes accept() returns None if we have multiple processes listening
+            # sometimes accept() returns None if we have 
+            # multiple processes listening
             return
         tcp_conn = _TcpConnection(conn, self.host, self.port)
-        tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
+        tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = \
+            self.conn_handler(tcp_conn)
 
     def handle_error(self):
         stop() # FIXME: handle unscheduled errors more gracefully
@@ -363,7 +371,8 @@ class attach_server(asyncore.dispatcher):
 
 class create_client(asyncore.dispatcher):
     "An asynchronous TCP client."
-    def __init__(self, host, port, conn_handler, connect_error_handler, connect_timeout=None):
+    def __init__(self, host, port, conn_handler, 
+        connect_error_handler, connect_timeout=None):
         self.host = host
         self.port = port
         self.conn_handler = conn_handler
@@ -376,7 +385,8 @@ class create_client(asyncore.dispatcher):
             sock.setblocking(0)
             event.write(sock, self.handle_connect, sock).add()
             try:
-                err = sock.connect_ex((host, port)) # FIXME: check for DNS errors, etc.
+                # FIXME: check for DNS errors, etc.
+                err = sock.connect_ex((host, port))
             except socket.error, why:
                 self.handle_conn_error()
                 return
@@ -390,7 +400,8 @@ class create_client(asyncore.dispatcher):
             asyncore.dispatcher.__init__(self)
             self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                self.connect((host, port)) # exceptions should be caught by handle_error
+                self.connect((host, port)) 
+                # exceptions should be caught by handle_error
             except socket.error, why:
                 self.handle_conn_error()
                 return
@@ -398,8 +409,10 @@ class create_client(asyncore.dispatcher):
                 self.handle_conn_error()
                 return
         if connect_timeout:
-            self._timeout_ev = schedule(connect_timeout, self.connect_error_handler, 
-                                        (errno.ETIMEDOUT, os.strerror(errno.ETIMEDOUT)))
+            self._timeout_ev = schedule(connect_timeout,
+                            self.connect_error_handler, 
+                            (errno.ETIMEDOUT, os.strerror(errno.ETIMEDOUT))
+            )
 
     def handle_connect(self, sock=None):
         if self._timeout_ev:
@@ -409,7 +422,8 @@ class create_client(asyncore.dispatcher):
         if sock is None: # asyncore
             sock = self.socket
         tcp_conn = _TcpConnection(sock, self.host, self.port)
-        tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = self.conn_handler(tcp_conn)
+        tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = \
+            self.conn_handler(tcp_conn)
 
     def handle_read(self): # asyncore
         pass
@@ -468,7 +482,8 @@ class _AsyncoreLoop:
                     if self._now >= when:
                         try:
                             self.events.remove(event)
-                        except ValueError: # a previous event may have removed this one.
+                        except ValueError: 
+                            # a previous event may have removed this one.
                             continue
                         what()
                     else:

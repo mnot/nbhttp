@@ -3,17 +3,17 @@
 """
 Non-Blocking HTTP Client
 
-This library allow implementation of an HTTP/1.1 client that is "non-blocking,"
-"asynchronous" and "event-driven" -- i.e., it achieves very high performance
-and concurrency, so long as the application code does not block (e.g.,
-upon network, disk or database access). Blocking on one response will block
-the entire client.
+This library allow implementation of an HTTP/1.1 client that is
+"non-blocking," "asynchronous" and "event-driven" -- i.e., it achieves very
+high performance and concurrency, so long as the application code does not
+block (e.g., upon network, disk or database access). Blocking on one response
+will block the entire client.
 
 Instantiate a Client with the following parameter:
   - res_start (callable)
   
-Call req_start on the Client instance to begin a request. It takes the following 
-arguments:
+Call req_start on the Client instance to begin a request. It takes the
+following arguments:
   - method (string)
   - uri (string)
   - req_hdrs (list of (name, value) tuples)
@@ -30,7 +30,7 @@ Call req_done when the request is complete, whether or not it contains a
 body. It takes the following argument:
   - err (error dictionary, or None for no error)
 
-req_body_pause is called when the client needs you  to temporarily stop sending 
+req_body_pause is called when the client needs you to temporarily stop sending
 the request body, or restart. It must take the following argument:
   - paused (boolean; True means pause, False means unpause)
     
@@ -95,7 +95,8 @@ from http_common import HttpMessageHandler, \
     WAITING, HEADERS_DONE, \
     idempotent_methods, no_body_status, hop_by_hop_hdrs, \
     dummy, get_hdr
-from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ, ERR_READ_TIMEOUT, ERR_HTTP_VERSION
+from error import ERR_URL, ERR_CONNECT, ERR_LEN_REQ, \
+    ERR_READ_TIMEOUT, ERR_HTTP_VERSION
 
 req_remove_hdrs = hop_by_hop_hdrs + ['host']
 
@@ -168,11 +169,15 @@ class Client(HttpMessageHandler):
         except (IndexError, ValueError):
             body_len = None
             delimit = NOBODY
-        self._output_start("%s %s HTTP/1.1" % (self.method, self.uri), self.req_hdrs, delimit)
-        _idle_pool.attach(self._host, self._port,
-          self._handle_connect, self._handle_connect_error, self.connect_timeout)
+        self._output_start("%s %s HTTP/1.1" % (self.method, self.uri),
+            self.req_hdrs, delimit
+        )
+        _idle_pool.attach(self._host, self._port, self._handle_connect,
+            self._handle_connect_error, self.connect_timeout
+        )
         return self.req_body, self.req_done
-    # TODO: if we sent Expect: 100-continue, don't wait forever (i.e., schedule something)
+    # TODO: if we sent Expect: 100-continue, don't wait forever 
+    # (i.e., schedule something)
 
     def req_body(self, chunk):
         "Send part of the request body. May be called zero to many times."
@@ -181,12 +186,12 @@ class Client(HttpMessageHandler):
         
     def req_done(self, err=None):
         """
-        Signal the end of the request, whether or not there was a body. MUST be
-        called exactly once for each request. 
+        Signal the end of the request, whether or not there was a body. MUST
+        be called exactly once for each request.
         
-        If err is not None, it is an error dictionary (see the error module)
-        indicating that an HTTP-specific (i.e., non-application) error occurred
-        while satisfying the request; this is useful for debugging.
+         If err is not None, it is an error dictionary (see the error module)
+        indicating that an HTTP-specific (i.e., non-application) error
+        occurred while satisfying the request; this is useful for debugging.
         """
         self._output_end(err)            
 
@@ -203,7 +208,9 @@ class Client(HttpMessageHandler):
         self._output("") # kick the output buffer
         if self.read_timeout:
             self._read_timeout_ev = push_tcp.schedule(
-                self.read_timeout, self._handle_error, ERR_READ_TIMEOUT, 'connect')
+                self.read_timeout, self._handle_error, 
+                ERR_READ_TIMEOUT, 'connect'
+            )
         return self._handle_input, self._conn_closed, self._req_body_pause
 
     def _handle_connect_error(self, err):
@@ -225,19 +232,26 @@ class Client(HttpMessageHandler):
                 if self._retries < self.retry_limit:
                     self._retry()
                 else:
-                    self._handle_error(ERR_CONNECT, "Tried to connect %s times." % (self._retries + 1))
+                    self._handle_error(ERR_CONNECT, 
+                        "Tried to connect %s times." % (self._retries + 1)
+                    )
             else:
-                self._handle_error(ERR_CONNECT, "Can't retry %s method" % self.method)
+                self._handle_error(ERR_CONNECT, 
+                    "Can't retry %s method" % self.method
+                )
         else:
-            self._input_error(ERR_CONNECT, "Server dropped the connection before the whole response was received.")
+            self._input_error(ERR_CONNECT, 
+                "Server dropped connection before the response was received."
+            )
 
     def _retry(self):
         "Retry the request."
         if self._read_timeout_ev:
             self._read_timeout_ev.delete()
         self._retries += 1
-        _idle_pool.attach(self._host, self._port, 
-            self._handle_connect, self._handle_connect_error, self.connect_timeout)
+        _idle_pool.attach(self._host, self._port, self._handle_connect,
+            self._handle_connect_error, self.connect_timeout
+        )
 
     def _req_body_pause(self, paused):
         "The client needs the application to pause/unpause the request body."
@@ -246,7 +260,8 @@ class Client(HttpMessageHandler):
 
     # Methods called by common.HttpMessageHandler
 
-    def _input_start(self, top_line, hdr_tuples, conn_tokens, transfer_codes, content_length):
+    def _input_start(self, top_line, hdr_tuples, conn_tokens, 
+        transfer_codes, content_length):
         """
         Take the top set of headers from the input stream, parse them
         and queue the request to be processed by the application.
@@ -271,10 +286,15 @@ class Client(HttpMessageHandler):
                 self._conn_reusable = True
         if self.read_timeout:
             self._read_timeout_ev = push_tcp.schedule(
-                 self.read_timeout, self._input_error, ERR_READ_TIMEOUT, 'start')
+                 self.read_timeout, self._input_error, 
+                 ERR_READ_TIMEOUT, 'start'
+            )
         self.res_body_cb, self.res_done_cb = self.res_start_cb(
-            res_version, res_code, res_phrase, hdr_tuples, self.res_body_pause)
-        allows_body = (res_code not in no_body_status) or (self.method == "HEAD")
+            res_version, res_code, res_phrase, 
+            hdr_tuples, self.res_body_pause
+        )
+        allows_body = (res_code not in no_body_status) \
+            or (self.method == "HEAD")
         return allows_body 
 
     def _input_body(self, chunk):
@@ -283,8 +303,9 @@ class Client(HttpMessageHandler):
             self._read_timeout_ev.delete()
         self.res_body_cb(chunk)
         if self.read_timeout:
-            self._read_timeout_ev = push_tcp.schedule(
-                 self.read_timeout, self._input_error, ERR_READ_TIMEOUT, 'body')
+            self._read_timeout_ev = push_tcp.schedule(self.read_timeout,
+                self._input_error, ERR_READ_TIMEOUT, 'body'
+            )
 
     def _input_end(self):
         "Indicate that the response body is complete."
@@ -292,8 +313,8 @@ class Client(HttpMessageHandler):
             self._read_timeout_ev.delete()
         if self._tcp_conn:
             if self._tcp_conn.tcp_connected and self._conn_reusable:
-                # Note that we don't reset read_cb; if more bytes come in before
-                # the next request, we'll still get them.
+                # Note that we don't reset read_cb; if more bytes come in
+                # before the next request, we'll still get them.
                 _idle_pool.release(self._tcp_conn)
             else:
                 self._tcp_conn.close()
@@ -319,7 +340,10 @@ class Client(HttpMessageHandler):
     # misc
 
     def _handle_error(self, err, detail=None):
-        "Handle a problem with the request by generating an appropriate response."
+        """
+        Handle a problem with the request by generating an appropriate
+        response.
+        """
         assert self._input_state == WAITING
         if self._read_timeout_ev:
             self._read_timeout_ev.delete()
@@ -328,7 +352,9 @@ class Client(HttpMessageHandler):
             self._tcp_conn = None
         if detail:
             err['detail'] = detail
-        status_code, status_phrase = err.get('status', ('504', 'Gateway Timeout'))
+        status_code, status_phrase = err.get('status', 
+            ('504', 'Gateway Timeout')
+        )
         hdrs = [
             ('Content-Type', 'text/plain'),
             ('Connection', 'close'),
@@ -346,14 +372,16 @@ class _HttpConnectionPool:
     "A pool of idle TCP connections for use by the client."
     _conns = {}
 
-    def attach(self, host, port, handle_connect, handle_connect_error, connect_timeout):
+    def attach(self, host, port, handle_connect, 
+        handle_connect_error, connect_timeout):
         "Find an idle connection for (host, port), or create a new one."
         while True:
             try:
                 tcp_conn = self._conns[(host, port)].pop()
             except (IndexError, KeyError):
-                push_tcp.create_client(host, port, handle_connect, handle_connect_error, 
-                                       connect_timeout)
+                push_tcp.create_client(host, port, 
+                    handle_connect, handle_connect_error, connect_timeout
+                )
                 break        
             if tcp_conn.tcp_connected:
                 tcp_conn.read_cb, tcp_conn.close_cb, tcp_conn.pause_cb = \
@@ -366,7 +394,9 @@ class _HttpConnectionPool:
             def idle_close():
                 "Remove the connection from the pool when it closes."
                 try:
-                    self._conns[(tcp_conn.host, tcp_conn.port)].remove(tcp_conn)
+                    self._conns[
+                        (tcp_conn.host, tcp_conn.port)
+                    ].remove(tcp_conn)
                 except ValueError:
                     pass
             tcp_conn.close_cb = idle_close
