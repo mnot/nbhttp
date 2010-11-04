@@ -36,6 +36,8 @@ import c_zlib
 from http_common import dummy
 
 compressed_hdrs = True
+# There is a null character ('\0') at the end of the dictionary. The '\0' might
+# be removed in future spdy versions.
 dictionary = \
 "optionsgetheadpostputdeletetraceacceptaccept-charsetaccept-encodingaccept-" \
 "languageauthorizationexpectfromhostif-modified-sinceif-matchif-none-matchi" \
@@ -49,17 +51,19 @@ dictionary = \
 "ndayTuesdayWednesdayThursdayFridaySaturdaySundayJanFebMarAprMayJunJulAugSe" \
 "pOctNovDecchunkedtext/htmlimage/pngimage/jpgimage/gifapplication/xmlapplic" \
 "ation/xhtmltext/plainpublicmax-agecharset=iso-8859-1utf-8gzipdeflateHTTP/1" \
-".1statusversionurl"
+".1statusversionurl\0"
 
 # states
 WAITING, READING_FRAME_DATA = 1, 2
 
 # frame types
 DATA_FRAME = 0x00
+# Control frame, version number is 2.
+CTL_FRM = 0x8002
 CTL_SYN_STREAM = 0x01
 CTL_SYN_REPLY = 0x02
-CTL_FIN_STREAM = 0x03
-CTL_HELLO = 0x04
+CTL_RST_STREAM = 0x03
+CTL_SETTINGS = 0x04
 CTL_NOOP = 0x05
 CTL_PING = 0x06
 CTL_GOAWAY = 0x07
@@ -67,12 +71,13 @@ CTL_GOAWAY = 0x07
 # flags
 FLAG_NONE = 0x00
 FLAG_FIN = 0x01
+FLAG_UNIDIRECTIONAL = 0x02
 
 STREAM_MASK = 0x7fffffff
 
 class SpdyMessageHandler:
     """
-    This is a base class for something that has to parse and/or serialise 
+    This is a base class for something that has to parse and/or serialise
     SPDY messages, request or response.
 
     For parsing, it expects you to override _input_start, _input_body and
@@ -97,7 +102,6 @@ class SpdyMessageHandler:
             self._decompress = dummy
 
     # input-related methods
-
     def _input_start(self, stream_id, hdr_tuples):
         """
         Take the top set of headers from a new request and queue it
@@ -112,7 +116,7 @@ class SpdyMessageHandler:
     def _input_end(self, stream_id):
         "Indicate that the response body is complete."
         raise NotImplementedError
-    
+
     def _input_error(self, stream_id, err, detail=None):
         "Indicate a parsing problem with the body."
         raise NotImplementedError
@@ -151,12 +155,17 @@ class SpdyMessageHandler:
                     stream_id = self._input_stream_id # for FLAG_FIN below
                 elif self._input_frame_type in [CTL_SYN_STREAM, CTL_SYN_REPLY]:
                     stream_id = struct.unpack("!I", frame_data[:4])[0] & STREAM_MASK # FIXME: what if they lied about the frame len?
-                    hdr_tuples = self._parse_hdrs(frame_data[6:]) or self._input_error(stream_id, 1) # FIXME: proper error here
+                    tuple_pos = 4 + 2
+                    if self._input_frame_type == CTL_SYN_STREAM:
+                      associated_stream_id = struct.unpack("!I", frame_data[4:8])[0]
+                      tuple_pos += 4
+                    hdr_tuples = self._parse_hdrs(frame_data[tuple_pos:]) or self._input_error(stream_id, 1) # FIXME: proper error here
                     # FIXME: expose pri
                     self._input_start(stream_id, hdr_tuples)
-                elif self._input_frame_type == CTL_FIN_STREAM:
-                    self._input_error(stream_id, err=1) # FIXME: proper error here
-                elif self._input_frame_type == CTL_HELLO:
+                elif self._input_frame_type == CTL_RST_STREAM:
+                    stream_id = struct.unpack("!I", frame_data[:4])[0] & STREAM_MASK
+                    self._input_end(stream_id)
+                elif self._input_frame_type == CTL_SETTINGS:
                     pass # FIXME
                 elif self._input_frame_type == CTL_NOOP:
                     pass
@@ -166,7 +175,7 @@ class SpdyMessageHandler:
                     pass # FIXME
                 else: # unknown frame type
                     raise ValueError, "Unknown frame type" # FIXME: don't puke
-                if self._input_flags & FLAG_FIN: # FIXME: invalid on FIN_STREAM
+                if self._input_flags & FLAG_FIN: # FIXME: invalid on CTL_RST_STREAM
                     self._input_end(stream_id)
                 self._input_state = WAITING
                 if rest:
@@ -217,11 +226,19 @@ class SpdyMessageHandler:
     def _ser_syn_frame(self, type, flags, stream_id, hdr_tuples):
         "Returns a SPDY SYN_[STREAM|REPLY] frame."
         hdrs = self._compress(self._ser_hdrs(hdr_tuples))
-        data = struct.pack("!IH%ds" % len(hdrs),
-            STREAM_MASK & stream_id,
-            0x00,  # unused
-            hdrs
-        )
+        if (type == CTL_SYN_STREAM):
+          data = struct.pack("!IIH%ds" % len(hdrs),
+              STREAM_MASK & stream_id,
+              0x00,  # associated stream id
+              0x00,  # unused
+              hdrs
+           )
+        else:
+          data = struct.pack("!IH%ds" % len(hdrs),
+              STREAM_MASK & stream_id,
+              0x00,  # unused
+              hdrs
+          )
         return self._ser_ctl_frame(type, flags, data)
 
     @staticmethod
@@ -229,7 +246,7 @@ class SpdyMessageHandler:
         "Returns a SPDY control frame."
         # TODO: check that data len doesn't overflow
         return struct.pack("!HHI%ds" % len(data),
-            0x8001,
+            CTL_FRM,
             type,
             (flags << 24) + len(data),
             data

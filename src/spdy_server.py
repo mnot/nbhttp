@@ -13,7 +13,7 @@ Instantiate a Server with the following parameters:
   - host (string)
   - port (int)
   - req_start (callable)
-  
+
 req_start is called when a request starts. It must take the following arguments:
   - method (string)
   - uri (string)
@@ -23,20 +23,20 @@ req_start is called when a request starts. It must take the following arguments:
 and return:
   - req_body (callable)
   - req_done (callable)
-    
-req_body is called when part of the request body is available. It must take the 
+
+req_body is called when part of the request body is available. It must take the
 following argument:
   - chunk (string)
 
-req_done is called when the request is complete, whether or not it contains a 
+req_done is called when the request is complete, whether or not it contains a
 body. It must take the following argument:
   - err (error dictionary, or None for no error)
 
-Call req_body_pause when you want the server to temporarily stop sending the 
+Call req_body_pause when you want the server to temporarily stop sending the
 request body, or restart. You must provide the following argument:
   - paused (boolean; True means pause, False means unpause)
-    
-Call res_start when you want to start the response, and provide the following 
+
+Call res_start when you want to start the response, and provide the following
 arguments:
   - status_code (string)
   - status_phrase (string)
@@ -45,15 +45,15 @@ arguments:
 It returns:
   - res_body (callable)
   - res_done (callable)
-    
-Call res_body to send part of the response body to the client. Provide the 
+
+Call res_body to send part of the response body to the client. Provide the
 following parameter:
   - chunk (string)
-  
-Call res_done when the response is finished, and provide the 
+
+Call res_done when the response is finished, and provide the
 following argument if appropriate:
   - err (error dictionary, or None for no error)
-    
+
 See the error module for the complete list of valid error dictionaries.
 
 Where possible, errors in the request will be responded to with the appropriate
@@ -101,13 +101,14 @@ log.setLevel(logging.INFO)
 
 class SpdyServer:
     "An asynchronous SPDY server."
-    def __init__(self, host, port, request_handler):
+    def __init__(self, host, port, request_handler, log=None):
         self.request_handler = request_handler
         self.server = push_tcp.create_server(host, port, self.handle_connection)
-        
+        self.log = log
+
     def handle_connection(self, tcp_conn):
         "Process a new push_tcp connection, tcp_conn."
-        conn = SpdyServerConnection(self.request_handler, tcp_conn)
+        conn = SpdyServerConnection(self.request_handler, tcp_conn, self.log)
         return conn._handle_input, conn._conn_closed, conn._res_body_pause
 
 
@@ -191,13 +192,13 @@ class SpdyServerConnection(SpdyMessageHandler):
     def _input_body(self, stream_id, chunk):
         "Process a request body chunk from the wire."
         self._streams[stream_id][0](chunk)
-    
+
     def _input_end(self, stream_id):
         "Indicate that the request body is complete."
         self._streams[stream_id][1](None)
         # TODO: delete stream if output side is half-closed.
 
-    def _input_error(self, err, detail=None):
+    def _input_error(self, stream_id, err, detail=None):
         "Indicate a parsing problem with the request body."
         # FIXME: rework after fixing spdy_common
         err['detail'] = detail
@@ -222,7 +223,7 @@ class SpdyServerConnection(SpdyMessageHandler):
         self.res_body(body)
         self.res_done()
 
-    
+
 def test_handler(method, uri, hdrs, res_start, req_pause):
     """
     An extremely simple (and limited) server request_handler.
@@ -234,7 +235,8 @@ def test_handler(method, uri, hdrs, res_start, req_pause):
     res_body('This is SPDY.')
     res_done(None)
     return dummy, dummy
-    
+
+
 if __name__ == "__main__":
     logging.basicConfig()
     log = logging.getLogger('server')
