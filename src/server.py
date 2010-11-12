@@ -98,10 +98,6 @@ from http_common import HttpMessageHandler, \
 
 from error import ERR_HTTP_VERSION, ERR_HOST_REQ, ERR_WHITESPACE_HDR, ERR_TRANSFER_CODE
 
-logging.basicConfig()
-log = logging.getLogger('server')
-log.setLevel(logging.WARNING)
-
 # FIXME: assure that the connection isn't closed before reading the entire req body
 # TODO: filter out 100 responses to HTTP/1.0 clients that didn't ask for it.
 
@@ -274,6 +270,9 @@ def test_handler(method, uri, hdrs, res_start, req_pause):
     return dummy, dummy
     
 if __name__ == "__main__":
+    logging.basicConfig()
+    log = logging.getLogger('server')
+    log.setLevel(logging.WARNING)
     sys.stderr.write("PID: %s\n" % os.getpid())
     h, p = '127.0.0.1', int(sys.argv[1])
     server = Server(h, p, test_handler)
