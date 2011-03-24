@@ -526,14 +526,25 @@ class _AsyncoreLoop:
                         pass
         return event_holder()
 
+_event_running = False
+def _event_run(*args):
+    _event_running = True
+    event.dispatch(*args)
+
+def _event_stop(*args):
+    _event_running = False
+    event.abort(*args)
+
 if event:
     schedule = event.timeout
-    run = event.dispatch
-    stop =  event.abort
+    run = _event_run
+    stop =  _event_stop
     now = time.time
+    running = _event_running
 else:
     _loop = _AsyncoreLoop()
     schedule = _loop.schedule
     run = _loop.run
     stop = _loop.stop
     now = _loop.time
+    running = _loop.running
