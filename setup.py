@@ -3,12 +3,12 @@
 from distutils.core import setup
 
 setup(name='nbhttp',
-      version='0.7.1',
+      version='0.7.2',
       description='Non-blocking HTTP components',
       author='Mark Nottingham',
       author_email='mnot@mnot.net',
       url='http://github.com/mnot/nbhttp/',
-      download_url='http://github.com/mnot/nbhttp/tarball/nbhttp-0.7.1',
+      download_url='http://github.com/mnot/nbhttp/tarball/nbhttp-0.7.2',
       packages=['nbhttp'],
       package_dir={'nbhttp': 'src'},
       scripts=['scripts/proxy.py'],
