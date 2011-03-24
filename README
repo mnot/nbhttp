@@ -28,6 +28,12 @@ See <http://code.google.com/p/pyevent/>.
 
 * Installation
 
+If you have setuptools, you can install from the repository:
+
+> easy_install nbhttp
+
+Otherwise, download a tarball and install using:
+
 > python setup.py install
 
 
