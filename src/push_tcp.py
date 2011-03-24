@@ -547,4 +547,4 @@ else:
     run = _loop.run
     stop = _loop.stop
     now = _loop.time
-    running = _loop.running
+    running = _loop._running
