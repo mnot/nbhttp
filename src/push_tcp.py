@@ -318,10 +318,9 @@ class _TcpConnection(asyncore.dispatcher):
 
     def handle_error(self):
         """
-        asyncore-specific misc error method. We treat it as if 
-        the connection was closed.
+        asyncore-specific misc error method.
         """
-        self.conn_closed()
+        raise
 
 
 def create_server(host, port, conn_handler):
