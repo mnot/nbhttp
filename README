@@ -2,6 +2,8 @@
 nbhttp - Tools for building non-blocking HTTP components
 
 
+NOTE: This is no longer maintained! See mnot/thor.
+
 * About nbhttp
 
 nbhttp is a set of libraries for building non-blocking (a.k.a. asynchronous
